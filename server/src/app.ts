@@ -5,6 +5,7 @@ import rateLimit from "@fastify/rate-limit";
 import type { Config } from "./config.js";
 import { openDatabase, type Db } from "./db.js";
 import authRoutes from "./routes/auth.js";
+import channelRoutes from "./routes/channels.js";
 import wsGateway from "./ws/gateway.js";
 import { BroadcastHub } from "./ws/hub.js";
 import type { Envelope, PublicUser, SessionRow } from "./types.js";
@@ -65,6 +66,9 @@ export function buildApp(config: Config): FastifyInstance {
   // Auth REST endpoints (register/login/logout/refresh). Config is passed via the
   // register options so handlers can read the session TTL and rate-limit knobs.
   void app.register(authRoutes, { config });
+
+  // Channel REST endpoints: create channel + message history (SPEC.md §9).
+  void app.register(channelRoutes, { config });
 
   // WebSocket gateway (SPEC.md §7): connect-time auth via the first `identify`
   // frame, `ready` snapshot, and live `presence.update` broadcasts.
