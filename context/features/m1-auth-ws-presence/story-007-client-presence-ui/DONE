@@ -1,0 +1,38 @@
+Validated: 2026-06-04
+Branch: main
+
+Configured checks:
+- npm run typecheck (server tsc --noEmit + client svelte-check): PASS (117 files, 0 errors, 0 warnings)
+- cd client && npm run build (vite build): PASS (121 modules, built in 597ms)
+
+Acceptance Criteria:
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| After login, client opens WS and authenticates with stored token per handshake | PASS | Presence.svelte:12 onMount→gateway.connect(); gateway.svelte.ts:108 new WebSocket(wsUrl()); wsUrl() (:46-51) derives ws/wss + /ws from store.serverUrl; onopen (:111-117) sends {op:"identify",d:{token}} reading store.sessionToken at send time |
+| On ready, renders member list with online/offline indicators incl. current user | PASS | gateway.svelte.ts:64-70 seeds fresh Map from frame.d.members; Presence.svelte:44-52 renders rows with .dot .online/.offline and (you) suffix via selfId (:20) |
+| On presence.update, updates member status live without reload | PASS | gateway.svelte.ts:72-79 mutates matching userId and reassigns Map (new Map(_members)) so $derived list (:32) recomputes reactively, no reload |
+| Connection lifecycle: auto-reconnect w/ backoff; auth-failure close clears session + returns to login | PASS | onclose (:130-146): 4001 → _authFailed=true, no reconnect; other closes → scheduleReconnect() (:92-98) capped jittered exponential backoff (1s base, 30s cap); Presence.svelte:16-18 $effect→onSessionInvalid; App.svelte:54-59 handleSessionInvalid clears keychain+store+view; intentional flag suppresses reconnect |
+| Frames parsed/sent as {op, d} envelopes | PASS | types.ts:44-52 Envelope/ServerFrame union; gateway.svelte.ts:54-60 shape-guards string op; :62-83 typed switch(frame.op); identify sent as {op,d} |
+| Svelte 5 runes; typecheck passes; end-to-end two-client live flip | PASS (code) / UNTESTABLE (manual e2e) | Runes confirmed ($state/$derived/$props/$effect); typecheck passes. Two-client live flip needs Rust toolchain + two native Tauri windows — untestable here; all code paths verified against ws-protocol contract and server/src/ws/gateway.ts |
+
+Manual e2e (SPEC §14): start server; run two Tauri clients pointed at it; login as two users; both appear online in Members. Close client B → within ~1s client A's row flips offline (muted dot) via presence.update, no reload. Re-login B → flips back online (green dot). 4001 path: run `server revoke-user` for B while connected → within ≤30s (heartbeat reaper) B's socket closes 4001 and B returns to login with session cleared.
+
+Quality:
+- Svelte 5 runes; socket logic in gateway.svelte.ts; no .js/.ts relative-import suffixes (grep clean): PASS
+- Conforms to ws-protocol contract (path /ws, identify, 4001, {op,d} envelope, ready/presence.update shapes verified against server/src/ws/gateway.ts): PASS
+- Reuses authStore + session keychain wrapper, no reimplementation: PASS
+- No TODO/placeholder/console.*; largest changed file 191 lines: PASS
+
+Suggested commit message:
+feat(client): gateway connection & live presence list (story 007)
+
+Add a Svelte 5 runes gateway.svelte.ts module owning the WebSocket
+lifecycle (connect → identify → ready/presence.update → reconnect or
+teardown) and a reactive presence Map, plus a Presence.svelte member
+list rendered in App's "app" view. Connects to /ws (ws/wss derived from
+serverUrl), authenticates with the stored session token, seeds members
+from `ready`, applies `presence.update` live, reconnects with capped
+exponential backoff on drops, and routes a 4001 auth-failure close back
+to login (clearing the session). Closes the M1 acceptance loop.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
