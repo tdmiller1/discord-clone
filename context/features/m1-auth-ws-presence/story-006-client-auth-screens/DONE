@@ -1,0 +1,35 @@
+Validated: 2026-06-04
+Branch: main
+
+Checks (report only):
+- npm run typecheck (server tsc --noEmit + client svelte-check): PASS — 115 files, 0 errors, 0 warnings.
+- cd client && npm run build (vite build): PASS — 119 modules transformed, built cleanly.
+- tauri dev live keychain round-trip: UNTESTABLE here (manual). Verified via code paths instead — see notes.
+
+Acceptance Criteria:
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| Launch reads stored session and routes app-or-auth | PASS | App.svelte:14-50 bootstrap(): getSession() -> validateSession (POST /api/refresh); ok -> setSession(rotated)+applySession+view "app"; unauthorized -> deleteSession+clear+login; network/other -> login (no strand on loading); no token -> login. |
+| Register form (serverUrl+token+username+password) -> POST /api/register | PASS | Register.svelte:84-120 four inputs; submit() calls register() (auth.ts:72-80 -> POST /api/register, success 201); on ok setSession(session)+applySession+onAuthed. |
+| Login form (username+password, serverUrl remembered) -> POST /api/login; logout clears keychain -> login | PASS | Login.svelte serverUrl prefilled from store with "change" toggle (71-81); submit -> login() (auth.ts:83-90 POST /api/login, 200). Logout: App.svelte:40-46 best-effort logout() then deleteSession()+clear()+view "login". |
+| Server URL persisted (localStorage, NOT keychain) | PASS | config.ts:4-22 localStorage key "dc:serverUrl" via getStoredServerUrl/setStoredServerUrl (try/catch); store.setServerUrl persists (authStore.svelte.ts:47-50). session.ts keychain stores token only. |
+| Error states surfaced (invalid/used token, dup username, wrong creds, disabled, network) | PASS | auth.ts:24-34 mapError: 400 invalid_token->invalid_token, 409->username_taken, 401->invalid_credentials (covers disabled per contract), 429->rate_limited, fetch throw->network. messageFor in Register/Login renders to .err. |
+| Svelte 5 runes; M0 ping screen replaced with view switch; typecheck passes | PASS | $state/$derived/$props/onclick/onsubmit/bind:value throughout; no export let/on:/writable (grep). App.svelte View union "loading|register|login|app" replaces the ping screen. typecheck PASS. |
+| contracts/client-session.md documents store shape for story 007 | PASS | client-session.md documents store import path, reactive fields (currentUser/sessionToken/serverUrl/expiresAt/isAuthed), mutators (applySession/setServerUrl/clear), and story-007 consumption; matches authStore.svelte.ts exactly. |
+
+Quality checks:
+- Svelte 5 runes only; runes-outside-component live in authStore.svelte.ts (.svelte.ts) — PASS.
+- No .js import suffixes on the client (grep) — PASS.
+- Reuses lib/session.ts keychain wrapper; token-only (every setSession call passes result.data.session, never a password; grep) — PASS.
+- Endpoints/error codes conform to auth-api contract (story 003) — PASS.
+- No leftover TODO/placeholder; largest file Login.svelte at 140 lines (all < 1000) — PASS.
+
+Keychain round-trip (UNTESTABLE/manual) — code-path verification:
+- session.ts is the reused wrapper; token-only; getSession()->null and setSession/deleteSession->no-op outside Tauri (isTauri() guard), so browser dev degrades gracefully and always lands on login. Consistent with story 005.
+
+Documentation audit: new localStorage key "dc:serverUrl" and new client modules are not documented in CLAUDE.md/docs. Nice-to-have, not a blocker (M0 ping screen replacement is expected per the story).
+
+Suggested commit message:
+feat(client): register & login screens with session persistence
+
+Decision: PASS.
