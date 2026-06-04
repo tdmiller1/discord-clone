@@ -1,6 +1,13 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import type { Config } from "./config.js";
+import { openDatabase, type Db } from "./db.js";
+
+declare module "fastify" {
+  interface FastifyInstance {
+    db: Db;
+  }
+}
 
 /**
  * Builds the Fastify application. Kept separate from {@link ./index.ts} so it can
@@ -19,6 +26,13 @@ export function buildApp(config: Config): FastifyInstance {
   // Permissive CORS so the desktop webview (tauri://localhost, http://localhost:1420)
   // can call the API. Tighten the allowed origins later if needed (SPEC.md §12).
   void app.register(cors, { origin: true });
+
+  // Open/create the SQLite store and expose it to later route plugins as app.db.
+  const db = openDatabase(config);
+  app.decorate("db", db);
+  app.addHook("onClose", async () => {
+    db.close();
+  });
 
   app.get("/health", async () => ({
     status: "ok",
