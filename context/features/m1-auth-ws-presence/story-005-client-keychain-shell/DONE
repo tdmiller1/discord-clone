@@ -1,0 +1,33 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| Tauri shell exposes set/get/delete session-token commands via keyring crate, registered in lib.rs and granted in capabilities/default.json | PASS | lib.rs:11-33 defines set_session/get_session/delete_session (keyring v3 Entry, service "discord-clone" / account "session"); registered in invoke_handler generate_handler! (lib.rs:38-42); granted as bare command names in capabilities/default.json:6. Cargo.toml:21 adds keyring v3 with persistent per-platform backends. |
+| Small typed webview wrapper (client/src/lib/session.ts) invokes the commands and returns the stored session string or null | PASS | session.ts:10-25 exports async getSession (returns string\|null), setSession(token), deleteSession; mirrors config.ts style, named exports, no any. |
+| Stored value is the session token only — never the password | PASS | Only `token` crosses the boundary in both the Rust commands (lib.rs:12,45 plan) and the TS wrapper (session.ts:16). No password parameter anywhere; documented in contract. |
+| Browser-only path degrades gracefully (wrapper returns null/no-ops; webview type-checks and runs without Tauri) | PASS | session.ts guards every call with `if (!isTauri()) return null/return;` (lines 11,17,23). svelte-check passes (0 errors). isTauri exported from @tauri-apps/api/core (verified in node_modules). |
+| Cargo deps added; npm run typecheck (svelte-check) passes; tauri dev set->get->delete round-trip works | UNTESTABLE (manual) for round-trip; PASS for the rest | keyring dep added (Cargo.toml:21); `npm run typecheck` passes (server tsc + client svelte-check, 0 errors). The tauri dev round-trip requires a Rust toolchain + native window; cargo is not available in this environment. Code paths verified correct: commands registered in invoke_handler, granted in capabilities, keyring v3 API used correctly (set_password/get_password/delete_credential, NoEntry->Ok), wrapper guarded by isTauri(). |
+| contracts/keychain-commands.md documents command names, arg/return shapes, and JS wrapper API for story 006 | PASS | contracts/keychain-commands.md present (62 lines): keychain coordinates, IPC command table with signatures and arg key {token}, error model, JS wrapper API, browser degradation. |
+
+Documentation audit: docs/DEVELOPMENT.md Linux prereqs (line 17) and .github/workflows/ci.yml client job apt install (line 54) both already include `libdbus-1-dev` for the keyring Secret Service backend. No missing doc updates.
+
+Quality checks:
+- Commands registered in lib.rs invoke_handler AND granted in capabilities/default.json: yes.
+- Wrapper mirrors config.ts style, Svelte 5 conventions (no stores/export let), stores token only: yes.
+- No leftover TODO/placeholder text: confirmed.
+- No files over 1000 lines: largest changed file is 62 lines.
+
+Suggested commit message:
+
+feat(client): store session token in OS keychain via Tauri shell
+
+Add set_session/get_session/delete_session Tauri commands backed by the keyring
+crate (persistent per-platform OS keychain backends) and a typed
+client/src/lib/session.ts wrapper that degrades to null/no-op outside Tauri. The
+opaque session token only is persisted — never the password. CI and dev docs gain
+libdbus-1-dev for the Linux Secret Service backend.
+
+Story: /home/tucker/Repos/discord-clone/context/features/m1-auth-ws-presence/story-005-client-keychain-shell
