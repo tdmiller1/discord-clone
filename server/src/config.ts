@@ -20,6 +20,12 @@ export interface Config {
   authRateMax: number;
   /** Rate-limit window length for the auth endpoints, in milliseconds. */
   authRateWindowMs: number;
+  /** Max accepted message content length, in characters. */
+  maxMessageLength: number;
+  /** Default page size for message history when no limit is supplied. */
+  messageHistoryDefaultLimit: number;
+  /** Hard cap on the message-history page size; larger requests are clamped. */
+  messageHistoryMaxLimit: number;
 }
 
 function num(name: string, fallback: number): number {
@@ -44,5 +50,8 @@ export function loadConfig(): Config {
     sessionTtlSeconds: num("SESSION_TTL", 60 * 60 * 24 * 7),
     authRateMax: num("AUTH_RATE_MAX", 10),
     authRateWindowMs: num("AUTH_RATE_WINDOW_MS", 60_000),
+    maxMessageLength: num("MAX_MESSAGE_LENGTH", 4000),
+    messageHistoryDefaultLimit: num("MSG_HISTORY_DEFAULT_LIMIT", 50),
+    messageHistoryMaxLimit: num("MSG_HISTORY_MAX_LIMIT", 100),
   };
 }

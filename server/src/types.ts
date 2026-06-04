@@ -34,6 +34,24 @@ export interface InviteTokenRow {
   revoked: number; // 0 | 1
 }
 
+export interface ChannelRow {
+  id: number;
+  name: string;
+  type: "text" | "voice";
+  position: number;
+  created_by: number | null;
+  created_at: number;
+}
+
+export interface MessageRow {
+  id: number;
+  channel_id: number;
+  author_id: number;
+  content: string;
+  attachment_id: number | null;
+  created_at: number;
+}
+
 /** The user shape returned to clients — never includes `password_hash`. */
 export interface PublicUser {
   id: number;
@@ -48,6 +66,48 @@ export function toPublicUser(row: UserRow): PublicUser {
     id: row.id,
     username: row.username,
     displayName: row.display_name,
+    createdAt: row.created_at,
+  };
+}
+
+/** A channel as returned to clients (ready.channels, channel.create, REST). */
+export interface PublicChannel {
+  id: number;
+  name: string;
+  type: "text" | "voice";
+  position: number;
+  createdBy: number | null;
+  createdAt: number;
+}
+
+export function toPublicChannel(row: ChannelRow): PublicChannel {
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    position: row.position,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+  };
+}
+
+/** A message as returned to clients (message.create, history fetch). */
+export interface PublicMessage {
+  id: number;
+  channelId: number;
+  authorId: number;
+  content: string;
+  attachmentId: number | null;
+  createdAt: number;
+}
+
+export function toPublicMessage(row: MessageRow): PublicMessage {
+  return {
+    id: row.id,
+    channelId: row.channel_id,
+    authorId: row.author_id,
+    content: row.content,
+    attachmentId: row.attachment_id,
     createdAt: row.created_at,
   };
 }
@@ -70,7 +130,7 @@ export interface Envelope<Op extends string = string, D = unknown> {
 /** server→client: op `ready` (sent once after a successful `identify`). */
 export interface ReadyPayload {
   user: PublicUser;
-  channels: never[]; // empty placeholder until M2
+  channels: never[]; // empty placeholder; becomes PublicChannel[] in story 002
   members: Member[];
 }
 
