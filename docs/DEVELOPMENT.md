@@ -14,7 +14,7 @@ SPEC.md   What we're building and the milestone roadmap (M0–M5).
 - **Node** ≥ 20 (24 recommended) — server and client frontend.
 - **Docker** + Compose — to run the server.
 - **Rust** (stable) + Tauri system deps — only to build the desktop client.
-  - Linux: `libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf build-essential file libssl-dev libxdo-dev`
+  - Linux: `libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf build-essential file libssl-dev libxdo-dev libdbus-1-dev`
   - See https://tauri.app/start/prerequisites/ for Windows/macOS.
 
 ## Server
