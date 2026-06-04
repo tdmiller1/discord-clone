@@ -1,0 +1,23 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| mint-token: generates random token, stores only its hash in invite_tokens (unused, not revoked), prints raw token once; invocable as `server mint-token` / `node dist/cli.js mint-token` with an npm script | PASS | server/src/cli.ts:14-20 inserts `hashToken(raw)` with created_by=NULL, revoked=0, used_by/used_at NULL; prints only the raw token. Smoke test confirmed single stdout line, DB token_hash == SHA-256(raw), raw never stored. npm script `cli` (server/package.json:17) + bin `server`->dist/cli.js (server/package.json:9-11). |
+| revoke-user <username>: sets users.disabled, revokes all sessions, prints confirmation; unknown username exits non-zero with clear message | PASS | server/src/cli.ts:22-47 transactionally sets disabled=1 and revoked=1 for all the user's sessions, reports count. Smoke test: alice -> disabled=1, all 3 sessions revoked, exit 0; unknownbob -> "unknown user: unknownbob" exit 1; missing arg -> usage exit 1. |
+| (Nice-to-have) revoke-token <id> revokes an unused invite token | PASS | server/src/cli.ts:49-67 guards `used_by IS NULL AND revoked = 0`. Smoke test: id 1 -> exit 0; re-revoke -> exit 1; bad id "abc" -> exit 1; missing id 999 -> exit 1. |
+| Reuses db + crypto helpers from story 001 (no duplicated hashing) and runs against same DATA_DIR/SQLite file the server uses | PASS | Imports openDatabase (db.ts), loadConfig (config.ts), generateToken/hashToken (crypto.ts) — no reimplemented hashing/DDL (cli.ts:2-4). Round-trip proved shared-file/WAL: CLI-minted token usable by a separately-launched server against the same DATA_DIR. |
+| CLI lives in its own entry (server/src/cli.ts), not index.ts (listen+signals only); --help lists commands | PASS | server/src/cli.ts is a separate entry with #!/usr/bin/env node shebang; index.ts unchanged (20 lines, listen+signals only, no CLI logic). `--help`/`-h` prints usage listing all 3 commands, exit 0; no-args/unknown print usage to stderr exit 1. |
+| npm run typecheck passes; mint->register->login round-trips end-to-end once story 003 lands (curl) | PASS | typecheck: server tsc --noEmit + client svelte-check both 0 errors. Story 003 has landed (HEAD = story-003-auth-rest-api). Verified end-to-end: CLI mint-token -> POST /api/register 201 -> POST /api/login 200 -> token re-use 400 -> CLI revoke-user -> login 401. |
+
+Additional checks:
+- npm run build:server succeeds; dist/cli.js produced.
+- ESM .js import specifiers used throughout; no TODO/placeholder text; cli.ts is 111 lines (no file over 1000).
+- stdout/stderr discipline correct: mint-token emits only the raw token on stdout; errors/usage-on-failure to stderr with exit 1.
+- Docs: SPEC.md §6 (lines 99, 107) already documents `server mint-token` / `server revoke-user <username>` and matches the implementation. CLAUDE.md/docs/DEVELOPMENT.md CLI mention is a nice-to-have, not required for correctness.
+- Temp test databases cleaned up; working tree clean.
+
+Suggested commit message:
+feat(cli): add admin mint-token & revoke-user/revoke-token CLI
