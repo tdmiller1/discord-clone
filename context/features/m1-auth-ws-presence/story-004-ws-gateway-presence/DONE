@@ -1,0 +1,29 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| WS endpoint authenticates on connect via story-003 validator; invalid/expired/revoked -> defined close code, no `ready` | PASS | gateway.ts:154-159 reuses `authenticateSession`; null -> `socket.close(4001)`, no `ready`. Smoke: bad token -> close 4001, gotReady=false. |
+| On success sends `ready { user, channels: [], members }` with per-member online status; channels empty (no M2) | PASS | gateway.ts:74-85,171; `channels: []`, members built from `WHERE disabled = 0` via `toPublicUser` + derived status. Smoke: ready had correct user, channels=[], alice online / bob offline. |
+| Tracks connections per user; first socket broadcasts `presence.update` online, last close broadcasts offline | PASS | PresenceRegistry add/remove return firstOnline/lastOffline (presence.ts:17-42); gateway.ts:170-184 (online, joiner excluded) & 106-114 (offline). Smoke: online on 2nd connect, offline on disconnect, joiner excluded from own update. |
+| All frames use `{ op, d }`; inbound size-limited; unknown ops ignored safely | PASS | Envelope type (types.ts:65-68); 64 KiB `maxPayload` + defensive guard (gateway.ts:65-66,126-129); malformed/missing-op/unknown-op all return without crashing (gateway.ts:131-190). Smoke: message.send/voice.join/garbage/missing-op all ignored, connection survived; oversize -> close 1009, server survived. |
+| Revoked session / `server revoke-user` closes sockets + flips offline; revoked session cannot connect | PASS | Connect-time: authenticateSession rejects revoked -> close 4001 (gateway.ts:154-159). Mid-session: heartbeat reaper re-validates per tick -> close 4001 (gateway.ts:210-216) [UNTESTABLE in 30s window, code path verified]. Smoke: revoke-user bob then fresh-session connect -> close 4001, no ready. |
+| Heartbeat/ping-pong detects dead sockets so presence isn't stuck online | PASS (code path) | Single setInterval(30s): isAlive false -> terminate() -> teardown -> offline; else clear isAlive + ping (gateway.ts:202-221); pong sets isAlive (gateway.ts:193-195). Timer firing UNTESTABLE without a 30s wait; logic verified. |
+| `npm run typecheck` passes; verifiable with two WS clients seeing ready + presence.update | PASS | typecheck exit 0 (server tsc + client svelte-check). Two-client behavior confirmed by smoke harness. |
+| `contracts/ws-protocol.md` documents handshake, `ready`, and `presence.update` | PASS | Contract documents endpoint, identify handshake + 10s deadline, close codes (4001/1009), ready payload, presence.update, heartbeat, 64 KiB limit, out-of-scope ops. Matches implementation. |
+
+Quality:
+- ESM `.js` import specifiers throughout; gateway registered inside buildApp (app.ts:61); index.ts listen-only and untouched.
+- Reuses authenticateSession + toPublicUser/types; no duplicated auth or row-mapping.
+- No `voice.*` ops emitted; `channels` is `[]`; `voiceChannelId` always null (required by SPEC §7 payload).
+- No TODO/placeholder text (the one "placeholder" hit is the intentional documented `channels: never[]` comment).
+- Largest changed file 229 lines (gateway.ts) — well under 1000.
+- No new env vars added; SPEC §12 / .env.example / loadConfig correctly unchanged (gateway constants hardcoded per plan).
+
+Smoke test: 12/12 checks passed (server start, ready shape, presence online/offline, joiner exclusion, bad-token close 4001, unknown/malformed-op survival, oversize close 1009 + server survival, revoke-user + revoked-connect rejection).
+
+Documentation note (non-blocking): SPEC §7 lists the server->client and M2/M4 client->server ops but not the M1-only `identify` client op; it is fully documented in contracts/ws-protocol.md. Optionally add `identify` to SPEC §7's client->server table if that table is meant to be exhaustive.
+
+Suggested commit message:
+feat(ws): add WebSocket gateway with identify auth and presence broadcast
