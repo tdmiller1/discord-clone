@@ -1,0 +1,24 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| POST /api/channels (Bearer) accepts {name, type:"text"}, trims+validates name, rejects type!="text", creates via createChannel with created_by=user.id + server-assigned position, returns 201 PublicChannel, emits channel.create to all sockets | PASS | routes/channels.ts:61-82; enum:["text"] (line 23) rejects non-text; trim + channel_name_invalid (65-68); nextChannelPosition (70); createChannel with createdBy=request.user!.id (71-76); broadcast (79); 201 send (80) |
+| GET /api/channels/:id/messages?before=&limit=50 (Bearer) returns PublicMessage[] keyset on id (id<before), newest-first, limit defaulted to 50 clamped to cap; nonexistent channel -> 404; before past oldest -> [] | PASS | routes/channels.ts:84-100; 404 channel_not_found (89-91); clampHistoryLimit with config bounds (93-96); getChannelMessages keyset id<before ORDER BY id DESC (channels.ts:96-111); before past oldest yields natural empty array |
+| Responses camelCase JSON w/ epoch-ms; errors well-formed (400 malformed/empty/oversized name/bad type, 404 channel_not_found, 401 unauthorized) | PASS | toPublicChannel/toPublicMessage guarantee camelCase+epoch-ms; schema 400s; 404 (90); 401 via requireAuth |
+| Routes registered inside buildApp(config) as channelRoutes plugin reading fastify.db; no second db conn / global singletons | PASS | app.ts:8 import, app.ts:71 register after authRoutes; const db = app.db (channels.ts:59); shared app.db throughout |
+| npm run typecheck passes; verifiable via curl/wscat | PASS (typecheck) / UNTESTABLE (curl) | typecheck passes (server tsc + client svelte-check, 0 errors); curl/wscat flow requires manual runtime testing |
+| contracts/channels-rest-api.md documents both endpoints (method, path, auth, body/query, success+error shapes, pagination semantics) | PASS | contracts/channels-rest-api.md present; both endpoints, shapes, error table, keyset pagination semantics, channel.create side effect documented |
+
+Suggested commit message:
+feat(server): add channels REST API (create + message history)
+
+Add channelRoutes plugin with POST /api/channels (create text channel,
+broadcast channel.create, 201 PublicChannel) and GET /api/channels/:id/messages
+(keyset history, newest-first), both Bearer-guarded via requireAuth and
+registered in buildApp. Add nextChannelPosition accessor and the
+channels-rest-api contract.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
