@@ -1,0 +1,17 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| POST /api/register consumes invite atomically, rejects dup usernames, Argon2id hash, issues session, returns {session,expiresAt,user} | PASS | routes/auth.ts:85-143; token-check + user-insert + token-mark in one db.transaction (97-118); password hashed before txn (94). curl: 201; dup username -> 409 with the token surviving (reusable for a new username). |
+| POST /api/login Argon2id verify, rejects disabled, uniform 401 (no enumeration) | PASS | routes/auth.ts:145-170; single invalid_credentials body for no-user/bad-pw/disabled (155-161). curl confirmed all three identical. |
+| Session stores only token hash + created_at/expires_at (from sessionTtlSeconds) + revoked=0, returns raw | PASS | issueSession routes/auth.ts:30-42; direct DB inspection shows only SHA-256 hash stored, raw token absent, sha256(raw) matches. |
+| Reusable Bearer validator (hash lookup, not expired/revoked, user not disabled, attaches user) exported for WS gateway | PASS | authenticateSession(db, rawToken) auth.ts:20-41 framework-agnostic (no runtime Fastify dep), returns {user,session}|null; requireAuth wraps it (57-73). |
+| POST /api/logout revokes current session; POST /api/refresh rotates per SPEC §6 | PASS | logout routes/auth.ts:172-181 (204 no body); refresh rotates in a txn (183-196); old token invalid after refresh - confirmed via curl. |
+| register + login rate-limited per SPEC §12 | PASS | @fastify/rate-limit non-global (app.ts:48-52), per-route opt-in (routes/auth.ts:81-83,87,147); 429 confirmed past AUTH_RATE_MAX=2. |
+| All routes inside buildApp(config); typecheck passes; full flow via curl | PASS | app.ts:56 registers plugin in buildApp; npm run typecheck clean; mint -> register -> login -> authed -> logout verified end to end. |
+| contracts/auth-api.md documents shapes, error codes, Bearer scheme | PASS | Contract present; status codes, error bodies, authenticateSession signature, and rate-limit env vars all match the implementation. |
+
+Suggested commit message:
+feat(auth): add REST auth API (register/login/logout/refresh) + session validator
