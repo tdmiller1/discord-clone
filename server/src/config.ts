@@ -16,6 +16,10 @@ export interface Config {
   maxUploadMb: number;
   /** Session lifetime, in seconds. */
   sessionTtlSeconds: number;
+  /** Max register/login requests per IP per rate-limit window. */
+  authRateMax: number;
+  /** Rate-limit window length for the auth endpoints, in milliseconds. */
+  authRateWindowMs: number;
 }
 
 function num(name: string, fallback: number): number {
@@ -38,5 +42,7 @@ export function loadConfig(): Config {
     rtcMaxPort: num("RTC_MAX_PORT", 40100),
     maxUploadMb: num("MAX_UPLOAD_MB", 10),
     sessionTtlSeconds: num("SESSION_TTL", 60 * 60 * 24 * 7),
+    authRateMax: num("AUTH_RATE_MAX", 10),
+    authRateWindowMs: num("AUTH_RATE_WINDOW_MS", 60_000),
   };
 }
