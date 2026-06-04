@@ -130,7 +130,7 @@ export interface Envelope<Op extends string = string, D = unknown> {
 /** server→client: op `ready` (sent once after a successful `identify`). */
 export interface ReadyPayload {
   user: PublicUser;
-  channels: never[]; // empty placeholder; becomes PublicChannel[] in story 002
+  channels: PublicChannel[];
   members: Member[];
 }
 
@@ -141,15 +141,36 @@ export interface PresenceUpdatePayload {
   voiceChannelId: number | null;
 }
 
-/** client→server: op `identify` (the only inbound op in M1). */
+/** client→server: op `identify` (the M1 auth handshake). */
 export interface IdentifyPayload {
   token: string;
 }
 
-/** Discriminated union of every server→client event the gateway emits in M1. */
+/** client→server: op `message.send` (attachmentId is ignored in M2, stored NULL). */
+export interface MessageSendPayload {
+  channelId: number;
+  content: string;
+  attachmentId?: number | null;
+}
+
+/** server→client: op `message.create` (broadcast to all sockets, incl. the sender). */
+export interface MessageCreatePayload {
+  message: PublicMessage;
+}
+
+/** server→client: op `channel.create` (emitted by the REST layer via `app.broadcast`). */
+export interface ChannelCreatePayload {
+  channel: PublicChannel;
+}
+
+/** Discriminated union of every server→client event the gateway emits. */
 export type ServerEvent =
   | Envelope<"ready", ReadyPayload>
-  | Envelope<"presence.update", PresenceUpdatePayload>;
+  | Envelope<"presence.update", PresenceUpdatePayload>
+  | Envelope<"message.create", MessageCreatePayload>
+  | Envelope<"channel.create", ChannelCreatePayload>;
 
-/** Discriminated union of every client→server command the gateway accepts in M1. */
-export type ClientCommand = Envelope<"identify", IdentifyPayload>;
+/** Discriminated union of every client→server command the gateway accepts. */
+export type ClientCommand =
+  | Envelope<"identify", IdentifyPayload>
+  | Envelope<"message.send", MessageSendPayload>;

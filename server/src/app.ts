@@ -1,15 +1,19 @@
 import Fastify, { type FastifyInstance } from "fastify";
+import type { WebSocket } from "@fastify/websocket";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import type { Config } from "./config.js";
 import { openDatabase, type Db } from "./db.js";
 import authRoutes from "./routes/auth.js";
 import wsGateway from "./ws/gateway.js";
-import type { PublicUser, SessionRow } from "./types.js";
+import { BroadcastHub } from "./ws/hub.js";
+import type { Envelope, PublicUser, SessionRow } from "./types.js";
 
 declare module "fastify" {
   interface FastifyInstance {
     db: Db;
+    /** Sends a `{ op, d }` envelope to every authed WS socket (skipping `except`). */
+    broadcast: (env: Envelope, except?: WebSocket) => void;
   }
   interface FastifyRequest {
     /** Set by the `requireAuth` preHandler on authenticated routes. */
@@ -44,6 +48,12 @@ export function buildApp(config: Config): FastifyInstance {
     db.close();
   });
 
+  // Flat all-sockets broadcast hub, constructed at app level (not inside a plugin)
+  // so it is visible to both the gateway and the REST layer; `app.broadcast` lets
+  // the REST channel route (story 003) push `channel.create` to every client.
+  const hub = new BroadcastHub();
+  app.decorate("broadcast", hub.broadcast);
+
   // Rate limiting, registered non-global so only the opted-in auth routes
   // (register/login) are throttled; authenticated traffic is untouched (SPEC.md §12).
   void app.register(rateLimit, {
@@ -58,7 +68,7 @@ export function buildApp(config: Config): FastifyInstance {
 
   // WebSocket gateway (SPEC.md §7): connect-time auth via the first `identify`
   // frame, `ready` snapshot, and live `presence.update` broadcasts.
-  void app.register(wsGateway, { config });
+  void app.register(wsGateway, { config, hub });
 
   app.get("/health", async () => ({
     status: "ok",
