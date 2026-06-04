@@ -1,0 +1,35 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| `ready.channels` populated from `listChannels` as `PublicChannel[]`, members/handshake unchanged | PASS | gateway.ts:90 `listChannels(db).map(toPublicChannel)`; members (:85-89) and identify handshake (:149-195) untouched; ReadyPayload.channels now PublicChannel[] (types.ts:133). |
+| Handle `message.send`: validate channel exists + non-empty trimmed content within max length; persist via insertMessage (author = socket user, attachment_id = NULL); broadcast `message.create { message: PublicMessage }` | PASS | gateway.ts:200-223 validates channelId finite, content string, trimmed non-empty, <= config.maxMessageLength, channel exists; persists authorId=state.userId!, attachmentId=null; broadcasts message.create with toPublicMessage(row). |
+| `attachmentId` ignored (stored NULL); content still required | PASS | gateway.ts:211 read but unused; attachmentId:null passed (:217); content required (:205-210). |
+| `message.create`/`channel.create` broadcast to all sockets incl. sender echo | PASS | hub.broadcast called with no `except` (gateway.ts:219-223); hub loops all sockets (hub.ts:32-38); channel.create helper exposed for story 003. |
+| Reusable broadcast helper exposed on hub/app for REST layer | PASS | BroadcastHub (hub.ts:14) built in buildApp (app.ts:54), decorated as app.broadcast (:55), typed on FastifyInstance (:16). |
+| Invalid `message.send` ignored safely — no bad row, no broadcast, no teardown; frames size-limited; unknown ops ignored | PASS | All validation failures return (gateway.ts:201-212) before persist/broadcast; unknown post-auth ops ignored (:200); 64KB size guard retained (:134). |
+| All frames use `{ op, d }` envelope; only post-auth sockets may send | PASS | message.send branch sits in post-auth region (after :195); envelope parse at :139-147. |
+| `npm run typecheck` passes; two-client behavior verifiable via wscat | PASS / UNTESTABLE | Typecheck passes (0 errors). Two-client live behavior wired correctly but needs manual runtime check with two wscat sessions. |
+| `contracts/ws-messaging.md` documents payloads, `ready.channels` change, and broadcast-helper API | PASS | Contract present covering all three ops, ready.channels change, error policy, app.broadcast usage for story 003. |
+
+Checks:
+- npm run typecheck (server tsc --noEmit + client svelte-check): PASS — 0 errors, 0 warnings.
+- No test runner configured (per CLAUDE.md) — n/a.
+
+Quality:
+- ESM .js import specifiers correct; config read via loadConfig() (maxMessageLength); index.ts untouched; no TODO/placeholder; largest touched file 262 lines.
+- No project-doc updates required (SPEC.md §7 already specifies these ops; per-story contract authored as part of the story).
+
+Suggested commit message:
+feat(ws): message.send persistence + broadcasts and ready.channels
+
+Extend the M1 WebSocket gateway so authed sockets can send validated
+message.send frames that are persisted via insertMessage and broadcast as
+message.create to all clients (including a sender echo). Populate
+ready.channels from listChannels, and expose a flat BroadcastHub decorated
+as app.broadcast so the story-003 REST layer can emit channel.create.
+
+Story: /home/tucker/Repos/discord-clone/context/features/m2-text-channels/story-002-messaging-gateway
