@@ -6,11 +6,15 @@
   "engines": {
     "node": ">=20"
   },
+  "bin": {
+    "server": "dist/cli.js"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "cli": "node dist/cli.js"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
