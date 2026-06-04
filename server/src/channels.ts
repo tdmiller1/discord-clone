@@ -40,6 +40,19 @@ export function getChannelById(db: Db, id: number): ChannelRow | undefined {
     | undefined;
 }
 
+/**
+ * Returns the next monotonic append `position` for a new channel: `MAX(position)
+ * + 1`, or `0` when the table is empty. Keeps the `SELECT MAX(position)` inside
+ * the data layer and yields a stable order consistent with {@link listChannels}'
+ * `ORDER BY position, id` (reorder is an explicit non-goal).
+ */
+export function nextChannelPosition(db: Db): number {
+  const row = db
+    .prepare("SELECT MAX(position) AS maxPos FROM channels")
+    .get() as { maxPos: number | null };
+  return row.maxPos === null ? 0 : row.maxPos + 1;
+}
+
 /** Lists every channel, ordered by `position` then `id`. */
 export function listChannels(db: Db): ChannelRow[] {
   return db
