@@ -1,11 +1,20 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
 import type { Config } from "./config.js";
 import { openDatabase, type Db } from "./db.js";
+import authRoutes from "./routes/auth.js";
+import type { PublicUser, SessionRow } from "./types.js";
 
 declare module "fastify" {
   interface FastifyInstance {
     db: Db;
+  }
+  interface FastifyRequest {
+    /** Set by the `requireAuth` preHandler on authenticated routes. */
+    user?: PublicUser;
+    /** Set by the `requireAuth` preHandler on authenticated routes. */
+    session?: SessionRow;
   }
 }
 
@@ -33,6 +42,18 @@ export function buildApp(config: Config): FastifyInstance {
   app.addHook("onClose", async () => {
     db.close();
   });
+
+  // Rate limiting, registered non-global so only the opted-in auth routes
+  // (register/login) are throttled; authenticated traffic is untouched (SPEC.md §12).
+  void app.register(rateLimit, {
+    global: false,
+    max: config.authRateMax,
+    timeWindow: config.authRateWindowMs,
+  });
+
+  // Auth REST endpoints (register/login/logout/refresh). Config is passed via the
+  // register options so handlers can read the session TTL and rate-limit knobs.
+  void app.register(authRoutes, { config });
 
   app.get("/health", async () => ({
     status: "ok",

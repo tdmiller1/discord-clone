@@ -173,7 +173,8 @@ no external TURN is required as long as the server is reachable.
   TLS, or supply a cert. WebRTC media is DTLS-SRTP encrypted by default.
 - **Rate-limit** auth endpoints; validate/limit uploads; size-limit WS frames.
 - **Config (env vars)**: `PUBLIC_HOST`, `HTTP_PORT`, `RTC_MIN_PORT`/`RTC_MAX_PORT`,
-  `DATA_DIR=/data`, `MAX_UPLOAD_MB`, `SESSION_TTL`. First boot generates an admin bootstrap
+  `DATA_DIR=/data`, `MAX_UPLOAD_MB`, `SESSION_TTL`, `AUTH_RATE_MAX`/`AUTH_RATE_WINDOW_MS`
+  (auth-endpoint rate limit; optional, sane defaults). First boot generates an admin bootstrap
   credential printed to logs.
 - **Deploy**: `docker compose up -d` with a `/data` volume and the ports above. Admin then mints tokens.
 
