@@ -5,6 +5,7 @@
   import Register from "./lib/Register.svelte";
   import { logout, validateSession } from "./lib/auth";
   import { store } from "./lib/authStore.svelte";
+  import { channelStore } from "./lib/channelStore.svelte";
   import { gateway } from "./lib/gateway.svelte";
   import { deleteSession, getSession, setSession } from "./lib/session";
 
@@ -43,6 +44,7 @@
     // Tear down the socket explicitly so it can't reconnect during the view switch
     // (idempotent — Presence's onDestroy also disconnects on unmount).
     gateway.disconnect();
+    channelStore.clear();
     const token = store.sessionToken;
     if (token) await logout(store.serverUrl, token);
     await deleteSession();
@@ -53,6 +55,7 @@
   /** A 4001 WS close: the session is already dead server-side — clear it + return to login. */
   async function handleSessionInvalid(): Promise<void> {
     gateway.clearAuthFailed();
+    channelStore.clear();
     await deleteSession();
     store.clear();
     view = "login";

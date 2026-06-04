@@ -26,11 +26,26 @@ export interface Member extends PublicUser {
   voiceChannelId: number | null; // always null in M1 (voice arrives M4)
 }
 
+/** A text/voice channel as it appears in `ready.channels` and `channel.create` (story 002/003). */
+export interface PublicChannel {
+  id: number;
+  name: string;
+  type: "text" | "voice";
+  position: number;
+  createdBy: number | null;
+  createdAt: number;
+}
+
 /** server→client: op `ready` (sent once after a successful `identify`). */
 export interface ReadyPayload {
   user: PublicUser;
-  channels: unknown[]; // always [] in M1 (channels arrive M2 — ignored)
+  channels: PublicChannel[]; // text/voice channels (story 002)
   members: Member[];
+}
+
+/** server→client: op `channel.create` (broadcast on POST /api/channels, story 002/003). */
+export interface ChannelCreatePayload {
+  channel: PublicChannel;
 }
 
 /** server→client: op `presence.update`. */
@@ -46,7 +61,8 @@ export interface Envelope<Op extends string = string, D = unknown> {
   d: D;
 }
 
-/** Discriminated union of every server→client frame the gateway emits in M1. */
+/** Discriminated union of every server→client frame the gateway emits. */
 export type ServerFrame =
   | Envelope<"ready", ReadyPayload>
-  | Envelope<"presence.update", PresenceUpdatePayload>;
+  | Envelope<"presence.update", PresenceUpdatePayload>
+  | Envelope<"channel.create", ChannelCreatePayload>;
