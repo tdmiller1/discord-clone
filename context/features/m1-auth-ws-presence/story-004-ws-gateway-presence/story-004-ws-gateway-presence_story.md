@@ -1,7 +1,7 @@
 ---
 story: 004
 title: WebSocket gateway & presence
-status: TODO
+status: DONE
 depends_on: [001, 003]
 provides_contract: contracts/ws-protocol.md
 ---
