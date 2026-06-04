@@ -1,7 +1,7 @@
 ---
 story: 006
 title: "Client: register & login screens"
-status: TODO
+status: DONE
 depends_on: [003, 005]
 provides_contract: contracts/client-session.md
 ---

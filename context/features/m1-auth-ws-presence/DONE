@@ -1,0 +1,58 @@
+Feature: M1 — Auth + WS Connect + Presence
+Validated: 2026-06-04
+Branch: main
+
+Stories:
+- story-001-data-layer-auth-schema ✓
+- story-002-admin-cli-tokens ✓
+- story-003-auth-rest-api ✓
+- story-004-ws-gateway-presence ✓
+- story-005-client-keychain-shell ✓
+- story-006-client-auth-screens ✓
+- story-007-client-presence-ui ✓
+
+Project-wide checks:
+- npm run typecheck → PASS (server `tsc --noEmit` + client `svelte-check`: 117 files, 0 errors, 0 warnings)
+- No test runner configured (per CLAUDE.md, typecheck is the only static gate).
+
+Version bump:
+- minor — root, server/, client/ package.json all 0.1.0 → 0.2.0 (left staged, not committed).
+- Reminder (not bumped): client/src-tauri/Cargo.toml version = "0.1.0" — bump to 0.2.0 to match.
+
+Docs audit (BASE c61fe25 .. HEAD):
+| Doc                       | Claimed by stories? | Modified in branch? | Action                          |
+| ------------------------- | ------------------- | ------------------- | ------------------------------- |
+| SPEC.md                   | no                  | yes                 | Modified, not pre-flagged       |
+| docs/DEVELOPMENT.md       | no                  | yes                 | Modified, not pre-flagged       |
+| .github/workflows/ci.yml  | no                  | yes                 | Modified, not pre-flagged       |
+| server/.env.example       | no                  | yes                 | Modified, not pre-flagged       |
+| README.md                 | no                  | no                  | — untouched                     |
+| CLAUDE.md                 | no                  | no                  | — untouched                     |
+
+Advisories (reminders only):
+- Schema change: server/src/schema.ts (users/invite_tokens/sessions) — consider an ADR or schema-doc note; SPEC.md §8 already documents the model.
+- Infra/deploy: server/Dockerfile — better-sqlite3 native-build toolchain; consider a deployment-doc review.
+- New entry points: server/src/routes/auth.ts, server/src/ws/gateway.ts, server/src/cli.ts — candidates for a CLAUDE.md quick-reference.
+
+⚠️ Working-tree state at validation time (uncommitted — resolve before the PR):
+- client/src-tauri/capabilities/default.json — uncommitted REVERT dropping keychain perms
+  (set_session/get_session/delete_session). HEAD is correct; discard this to avoid regressing story-005.
+- server/Dockerfile — uncommitted change ADDING the better-sqlite3 build toolchain; this is needed,
+  keep/commit it (HEAD's Dockerfile would fail the image build without it).
+- client/src-tauri/Cargo.lock — uncommitted churn (rides with the above).
+
+Suggested PR title:
+feat(m1-auth-ws-presence): token-bootstrapped auth, WS gateway & live presence
+
+Suggested PR body:
+Delivers the M1 acceptance loop (SPEC.md §14): the admin mints an invite token via a server CLI
+command; a new user registers in the Tauri client (server URL + token + username + password), logs
+in, and the client connects to the WebSocket gateway and renders the member list updating
+online/offline live. The session token persists in the OS keychain so a relaunch stays logged in,
+and the admin can revoke a user to kill their sessions.
+
+Next steps:
+- Resolve the working-tree files above (discard the capabilities revert; keep the Dockerfile fix).
+- Open the PR.
+- Run /review and /security-review against the PR.
+- Bump client/src-tauri/Cargo.toml version 0.1.0 → 0.2.0 to match the package.json bump.

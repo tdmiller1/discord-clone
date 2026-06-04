@@ -2,8 +2,8 @@
 name: M1 — Auth + WS Connect + Presence
 description: Token-bootstrapped accounts, login/session auth, and a live WebSocket member-presence list.
 type: feature
-status: planned
-completed_date:
+status: done
+completed_date: 2026-06-04
 ---
 
 # Feature: M1 — Auth + WS Connect + Presence
@@ -46,10 +46,10 @@ Deliver the M1 acceptance loop from `SPEC.md §14`: the admin mints an invite to
 
 | # | Story Directory | Title | Status |
 |---|----------------|-------|--------|
-| 1 | story-001-data-layer-auth-schema | Server data layer & crypto foundation | TODO |
-| 2 | story-002-admin-cli-tokens | Admin CLI: mint-token & revoke-user | TODO |
-| 3 | story-003-auth-rest-api | Auth REST API (register, login, session) | TODO |
-| 4 | story-004-ws-gateway-presence | WebSocket gateway & presence | TODO |
-| 5 | story-005-client-keychain-shell | Client: Tauri keychain session storage | TODO |
-| 6 | story-006-client-auth-screens | Client: register & login screens | TODO |
-| 7 | story-007-client-presence-ui | Client: gateway connection & live presence | TODO |
+| 1 | story-001-data-layer-auth-schema | Server data layer & crypto foundation | COMPLETE |
+| 2 | story-002-admin-cli-tokens | Admin CLI: mint-token & revoke-user | COMPLETE |
+| 3 | story-003-auth-rest-api | Auth REST API (register, login, session) | COMPLETE |
+| 4 | story-004-ws-gateway-presence | WebSocket gateway & presence | COMPLETE |
+| 5 | story-005-client-keychain-shell | Client: Tauri keychain session storage | COMPLETE |
+| 6 | story-006-client-auth-screens | Client: register & login screens | COMPLETE |
+| 7 | story-007-client-presence-ui | Client: gateway connection & live presence | COMPLETE |
