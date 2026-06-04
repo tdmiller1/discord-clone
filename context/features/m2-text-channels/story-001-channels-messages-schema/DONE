@@ -1,0 +1,28 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| `applySchema` extended to idempotently create `channels`+`messages` per SPEC §8 without disturbing M1 tables | PASS | schema.ts:44-66; verified runtime: re-running applySchema does not throw, and applying over an M1-only db preserves users and only adds channels/messages (attachments not created). |
+| `channels` columns/types/constraints | PASS | schema.ts:44-52; PRAGMA confirms id PK AUTOINCREMENT, name/type/position/created_at NOT NULL, type CHECK(text/voice) rejects bad values, created_by nullable FK→users. |
+| `messages` columns/types; `attachment_id` nullable, NO FK + documented deferral | PASS | schema.ts:54-66; foreign_key_list shows FKs only on channel_id→channels and author_id→users; attachment_id carries no FK; deferral documented inline (lines 59-61) and in contract. |
+| Index on `messages(channel_id, id)` | PASS | schema.ts:70 `idx_messages_channel_id`; present in sqlite_master after apply. |
+| Accessor module exports createChannel, getChannelById, listChannels (ORDER BY position,id), insertMessage, getChannelMessages (keyset id<before, newest-first, clamped limit) | PASS | channels.ts:17-114; all five exported plus clampHistoryLimit; listChannels orders by `position, id`; getChannelMessages uses `ORDER BY id DESC` with `AND id < ?` only when before is finite; keyset ordering verified at runtime. |
+| Row + public JSON types in types.ts (ChannelRow/MessageRow snake_case; PublicChannel/PublicMessage camelCase) | PASS | types.ts:37-53 (rows), 73-113 (public shapes + toPublicChannel/toPublicMessage); camelCase channelId/authorId/attachmentId/createdAt present. |
+| New tunables added to loadConfig() + .env.example | PASS | config.ts:23-28 (interface), 53-55 (loadConfig via num()); .env.example:13-16. |
+| `npm run typecheck` passes; starting against an M1 db creates tables without error; re-running idempotent | PASS | typecheck: server tsc + client svelte-check both clean (0 errors). Idempotency + M1 coexistence verified via better-sqlite3 runtime checks. |
+| `contracts/channels-data.md` documents tables, accessor API, pagination semantics, PublicChannel/PublicMessage JSON | PASS | contracts/channels-data.md present; covers both tables, full accessor API, keyset/clamp pagination semantics, public JSON shapes, config, and 002/003 usage notes. |
+
+Suggested commit message:
+feat(server): add channels & messages data layer (M2 story 001)
+
+Extend the SQLite schema with idempotent `channels` and `messages` tables
+plus a `(channel_id, id)` keyset index (per SPEC §8/§9), add ChannelRow/
+MessageRow + PublicChannel/PublicMessage types and mappers, three history/
+message-length config tunables, and a framework-agnostic `channels.ts`
+accessor module (createChannel, getChannelById, listChannels, insertMessage,
+getChannelMessages, clampHistoryLimit) that stories 002 and 003 build on.
+
+Story: /home/tucker/Repos/discord-clone/context/features/m2-text-channels/story-001-channels-messages-schema
