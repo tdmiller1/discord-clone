@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default permissions for the main window.",
   "windows": ["main"],
-  "permissions": ["core:default", "set_session", "get_session", "delete_session"]
+  "permissions": ["core:default"]
 }
