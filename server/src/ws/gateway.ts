@@ -2,17 +2,22 @@ import websocket, { type WebSocket } from "@fastify/websocket";
 import type { FastifyInstance, FastifyPluginAsync } from "fastify";
 import type { RawData } from "ws";
 import { authenticateSession } from "../auth.js";
+import { getChannelById, insertMessage, listChannels } from "../channels.js";
 import type { Config } from "../config.js";
 import {
+  toPublicChannel,
+  toPublicMessage,
   toPublicUser,
   type Member,
   type ReadyPayload,
   type UserRow,
 } from "../types.js";
+import { BroadcastHub } from "./hub.js";
 import { PresenceRegistry } from "./presence.js";
 
 interface WsGatewayOptions {
   config: Config;
+  hub: BroadcastHub;
 }
 
 /** Mutable per-connection state held alongside each live socket. */
@@ -60,8 +65,9 @@ function toBuffer(data: RawData): Buffer {
  */
 const wsGateway: FastifyPluginAsync<WsGatewayOptions> = async (
   app: FastifyInstance,
-  _opts: WsGatewayOptions,
+  opts: WsGatewayOptions,
 ) => {
+  const { config, hub } = opts;
   await app.register(websocket, {
     options: { maxPayload: WS_MAX_FRAME_BYTES },
   });
@@ -71,7 +77,7 @@ const wsGateway: FastifyPluginAsync<WsGatewayOptions> = async (
   /** Every live socket and its mutable state; the heartbeat sweeps this. */
   const sockets = new Map<WebSocket, ConnState>();
 
-  /** Builds the `ready` snapshot for `user`: empty channels + every non-disabled user with live status. */
+  /** Builds the `ready` snapshot for `user`: every channel + every non-disabled user with live status. */
   const buildReady = (user: ReadyPayload["user"]): ReadyPayload => {
     const rows = db
       .prepare("SELECT * FROM users WHERE disabled = 0")
@@ -81,7 +87,8 @@ const wsGateway: FastifyPluginAsync<WsGatewayOptions> = async (
       status: registry.isOnline(row.id) ? "online" : "offline",
       voiceChannelId: null,
     }));
-    return { user, channels: [], members };
+    const channels = listChannels(db).map(toPublicChannel);
+    return { user, channels, members };
   };
 
   app.get(WS_PATH, { websocket: true }, (socket: WebSocket) => {
@@ -103,6 +110,7 @@ const wsGateway: FastifyPluginAsync<WsGatewayOptions> = async (
         state.deadline = null;
       }
       sockets.delete(socket);
+      hub.remove(socket);
       if (state.authed && state.userId !== null) {
         const { lastOffline } = registry.remove(state.userId, socket);
         if (lastOffline) {
@@ -166,8 +174,10 @@ const wsGateway: FastifyPluginAsync<WsGatewayOptions> = async (
         state.token = token;
 
         // Add to the registry FIRST so the joiner sees itself online in `ready`,
-        // then snapshot members, then notify others exactly once.
+        // then snapshot members, then notify others exactly once. Register in the
+        // broadcast hub too so this socket receives `message.create`/`channel.create`.
         const { firstOnline } = registry.add(result.user.id, socket);
+        hub.add(socket);
         socket.send(JSON.stringify({ op: "ready", d: buildReady(result.user) }));
         if (firstOnline) {
           registry.broadcast(
@@ -185,9 +195,32 @@ const wsGateway: FastifyPluginAsync<WsGatewayOptions> = async (
         return;
       }
 
-      // Post-auth: M1 defines no in-scope client→server ops (`message.*`/`voice.*`
-      // arrive in M2/M4), so any/unknown op — including a second `identify` — is
-      // ignored safely.
+      // Post-auth: `message.send` is the only in-scope inbound op (`voice.*` arrives
+      // in M4). Any other op — including a second `identify` — is ignored safely.
+      if (op !== "message.send") return;
+      const d = (frame as { d?: unknown }).d;
+      if (typeof d !== "object" || d === null) return;
+      const channelId = (d as { channelId?: unknown }).channelId;
+      if (typeof channelId !== "number" || !Number.isFinite(channelId)) return;
+      const content = (d as { content?: unknown }).content;
+      if (typeof content !== "string") return;
+      const trimmed = content.trim();
+      if (trimmed.length === 0 || content.length > config.maxMessageLength) {
+        return;
+      }
+      // `attachmentId` is accepted on the wire but ignored in M2 (stored NULL).
+      if (!getChannelById(db, channelId)) return;
+      const row = insertMessage(db, {
+        channelId,
+        authorId: state.userId!,
+        content,
+        attachmentId: null,
+      });
+      // No `except`: the sender gets its own echo so it renders the authoritative row.
+      hub.broadcast({
+        op: "message.create",
+        d: { message: toPublicMessage(row) },
+      });
     });
 
     socket.on("pong", () => {
