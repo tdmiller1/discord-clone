@@ -1,0 +1,31 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+build/
+
+# rust / tauri
+client/src-tauri/target/
+client/src-tauri/gen/
+# generated icon set (derived from app-icon.png via `npm run icons`)
+client/src-tauri/icons/
+
+# local data (sqlite + uploaded images)
+data/
+*.sqlite
+*.sqlite-journal
+
+# env / secrets
+.env
+.env.local
+*.local
+
+# logs
+*.log
+npm-debug.log*
+
+# editor / os
+.DS_Store
+.idea/
+.vscode/

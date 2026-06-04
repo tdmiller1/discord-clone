@@ -1,0 +1,22 @@
+services:
+  server:
+    build: ./server
+    image: discord-clone-server:dev
+    ports:
+      - "8080:8080"
+      # UDP media range for the SFU (used from M4 onward). Keep in sync with RTC_*_PORT.
+      - "40000-40010:40000-40010/udp"
+    environment:
+      NODE_ENV: production
+      HTTP_PORT: "8080"
+      DATA_DIR: /data
+      PUBLIC_HOST: localhost
+      RTC_MIN_PORT: "40000"
+      RTC_MAX_PORT: "40010"
+      MAX_UPLOAD_MB: "10"
+    volumes:
+      - discord-data:/data
+    restart: unless-stopped
+
+volumes:
+  discord-data:
