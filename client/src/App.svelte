@@ -1,48 +1,80 @@
 <script lang="ts">
-  import { DEFAULT_SERVER_URL } from "./lib/config";
+  import { onMount } from "svelte";
+  import Login from "./lib/Login.svelte";
+  import Register from "./lib/Register.svelte";
+  import { logout, validateSession } from "./lib/auth";
+  import { store } from "./lib/authStore.svelte";
+  import { deleteSession, getSession, setSession } from "./lib/session";
 
-  type Status = "idle" | "checking" | "ok" | "error";
+  type View = "loading" | "register" | "login" | "app";
 
-  let serverUrl = $state(DEFAULT_SERVER_URL);
-  let status = $state<Status>("idle");
-  let detail = $state("");
+  let view = $state<View>("loading");
 
-  async function checkServer(): Promise<void> {
-    status = "checking";
-    detail = "";
-    try {
-      const res = await fetch(new URL("/health", serverUrl));
-      const body = (await res.json()) as { status?: string; service?: string };
-      if (res.ok && body.status === "ok") {
-        status = "ok";
-        detail = body.service ?? "server";
-      } else {
-        status = "error";
-        detail = `Unexpected response (${res.status})`;
-      }
-    } catch (err) {
-      status = "error";
-      detail = err instanceof Error ? err.message : String(err);
+  /** Launch bootstrap: read the stored token, validate via refresh, route accordingly. */
+  async function bootstrap(): Promise<void> {
+    const token = await getSession();
+    if (!token) {
+      // No stored token: first launch / returning user → login (register affordance shown).
+      view = "login";
+      return;
     }
+
+    const result = await validateSession(store.serverUrl, token);
+    if (result.ok) {
+      // refresh rotates the token — persist the NEW one or the next relaunch fails.
+      await setSession(result.data.session);
+      store.applySession(result.data);
+      view = "app";
+      return;
+    }
+
+    if (result.error === "unauthorized") {
+      // Stale/expired token: drop it and send the user to login.
+      await deleteSession();
+      store.clear();
+    }
+    // network or any other failure: keep the token, but don't strand on loading.
+    view = "login";
   }
+
+  async function handleLogout(): Promise<void> {
+    const token = store.sessionToken;
+    if (token) await logout(store.serverUrl, token);
+    await deleteSession();
+    store.clear();
+    view = "login";
+  }
+
+  onMount(() => {
+    void bootstrap();
+  });
 </script>
 
-<main>
-  <h1>discord-clone</h1>
-  <p class="tagline">M0 skeleton — see SPEC.md for the roadmap.</p>
+{#if view === "loading"}
+  <main>
+    <h1>discord-clone</h1>
+    <p class="tagline">Loading…</p>
+  </main>
+{:else if view === "register"}
+  <Register onAuthed={() => (view = "app")} onShowLogin={() => (view = "login")} />
+{:else if view === "login"}
+  <Login onAuthed={() => (view = "app")} onShowRegister={() => (view = "register")} />
+{:else}
+  <main>
+    <h1>discord-clone</h1>
+    <p class="tagline">Signed in as {store.currentUser?.username ?? "user"}.</p>
+    <section class="card">
+      <p class="muted">Channels and presence arrive in the next milestone.</p>
+      <div class="row">
+        <button onclick={handleLogout}>Log out</button>
+      </div>
+    </section>
+  </main>
+{/if}
 
-  <section class="card">
-    <label for="server">Server URL</label>
-    <div class="row">
-      <input id="server" bind:value={serverUrl} placeholder="http://localhost:8080" />
-      <button onclick={checkServer} disabled={status === "checking"}>
-        {status === "checking" ? "Checking…" : "Test connection"}
-      </button>
-    </div>
-    {#if status === "ok"}
-      <p class="ok">✓ Connected to {detail}</p>
-    {:else if status === "error"}
-      <p class="err">✗ {detail}</p>
-    {/if}
-  </section>
-</main>
+<style>
+  .muted {
+    color: var(--muted);
+    margin: 0 0 1rem;
+  }
+</style>
