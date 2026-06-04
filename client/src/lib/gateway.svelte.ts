@@ -15,7 +15,7 @@
  * view switch co-located with the rest of App's session handling.
  */
 import { store } from "./authStore.svelte";
-import type { Member, ServerFrame } from "./types";
+import type { Member, PublicChannel, ServerFrame } from "./types";
 
 type ConnStatus = "connecting" | "open" | "reconnecting" | "closed";
 
@@ -25,6 +25,7 @@ const AUTH_FAILURE_CODE = 4001;
 const WS_PATH = "/ws";
 
 let _members = $state(new Map<number, Member>());
+let _channels = $state(new Map<number, PublicChannel>());
 let _status = $state<ConnStatus>("closed");
 let _authFailed = $state(false);
 
@@ -34,6 +35,13 @@ const _memberList = $derived(
     if (a.status !== b.status) return a.status === "online" ? -1 : 1;
     return a.username.localeCompare(b.username, undefined, { sensitivity: "base" });
   }),
+);
+
+/** Text channels only (voice is M4), sorted by position then id for a stable list. */
+const _channelList = $derived(
+  [..._channels.values()]
+    .filter((c) => c.type === "text")
+    .sort((a, b) => a.position - b.position || a.id - b.id),
 );
 
 // Non-reactive module locals (deliberately NOT $state).
@@ -65,6 +73,9 @@ function handleFrame(frame: ServerFrame): void {
       const next = new Map<number, Member>();
       for (const member of frame.d.members) next.set(member.id, member);
       _members = next;
+      const nextChannels = new Map<number, PublicChannel>();
+      for (const channel of frame.d.channels) nextChannels.set(channel.id, channel);
+      _channels = nextChannels;
       _status = "open";
       backoffMs = BACKOFF_BASE_MS; // a clean (re)connect resets the backoff
       break;
@@ -75,6 +86,12 @@ function handleFrame(frame: ServerFrame): void {
       _members.set(frame.d.userId, { ...existing, status: frame.d.status });
       // Svelte 5 Maps aren't deeply reactive — reassign to recompute the derived list.
       _members = new Map(_members);
+      break;
+    }
+    case "channel.create": {
+      // Dedupe by id (the creator's own socket + the 201 response can both deliver it).
+      _channels.set(frame.d.channel.id, frame.d.channel);
+      _channels = new Map(_channels); // reassign to recompute the derived list
       break;
     }
     default:
@@ -156,6 +173,10 @@ export const gateway = {
   get members(): Member[] {
     return _memberList;
   },
+  /** Text channels sorted by position then id, seeded from `ready` + appended on `channel.create`. */
+  get channels(): PublicChannel[] {
+    return _channelList;
+  },
   /** Connection status for the UI status line. */
   get status(): ConnStatus {
     return _status;
@@ -178,6 +199,7 @@ export const gateway = {
     intentional = true;
     clearReconnectTimer();
     _members = new Map();
+    _channels = new Map();
     _status = "closed";
     const ws = socket;
     socket = null;
