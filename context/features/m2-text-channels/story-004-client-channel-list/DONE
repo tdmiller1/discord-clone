@@ -1,0 +1,23 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| Channel list rendered from `ready.channels`, appended live on `channel.create`, deduped by id | PASS | `gateway.svelte.ts:72-96` seeds `_channels` from `ready` and dedupes via `Map.set` on `channel.create`; rendered in `Presence.svelte:99-112`. |
+| Selecting a channel sets shared active-channel runes state; visually indicated; sensible default selected on first load | PASS | `channelStore.svelte.ts` runes singleton; `Presence.svelte:22-26` default-selection `$effect`; `class:active` highlight `Presence.svelte:105`. |
+| Create-channel control POSTs `{ name, type: "text" }` with Bearer; success appears (deduped) & selectable; 4xx surfaced; input cleared on success | PASS | `channels.ts:31-58` posts with `Authorization: Bearer`; `Presence.svelte:42-65` clears input on ok, surfaces `createErr` on error. Server `channels.ts:79-80` broadcasts + returns 201 body matching client. |
+| Only `type: "text"` channels listed/selectable; voice hidden | PASS | Derived getter filters `c.type === "text"` (`gateway.svelte.ts:41-45`). |
+| `npm run typecheck` passes; verifiable in running client (create → appears → live on 2nd client → selectable) | PASS / UNTESTABLE | typecheck: 0 errors (server tsc + client svelte-check 119 files). Live two-client flow is manual; types exactly mirror server contracts (`reply.code(201).send(channel)`, `{op:"channel.create",d:{channel}}`). |
+| `contracts/client-channel-state.md` documents the selection API & channel shape for story 005 | PASS | File present; documents `gateway.channels`, `PublicChannel`, `channelStore` API, default-selection, teardown, and consumer resolution pattern. |
+
+Quality:
+- Svelte 5 runes throughout ($state/$derived/$effect); no legacy stores or export let.
+- Client imports have no .js suffix.
+- No leftover TODO/placeholder (only an HTML input placeholder attr).
+- Largest changed file 227 lines (well under 1000).
+
+Documentation: No SPEC.md/CLAUDE.md changes required — client-only story consuming existing M2 server contracts (channel.create op and ready.channels documented under stories 002/003); no new env/config/schema.
+
+Suggested commit message:
+feat(client): channel list, selection store & create-channel UI (M2 story-004)
