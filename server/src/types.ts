@@ -51,3 +51,45 @@ export function toPublicUser(row: UserRow): PublicUser {
     createdAt: row.created_at,
   };
 }
+
+/** Live presence state of a user (SPEC.md §7). */
+export type PresenceStatus = "online" | "offline";
+
+/** A user as it appears in `ready.members`: PublicUser + live presence. */
+export interface Member extends PublicUser {
+  status: PresenceStatus;
+  voiceChannelId: number | null; // always null in M1 (voice arrives M4)
+}
+
+/** Generic realtime WS envelope (SPEC.md §7). */
+export interface Envelope<Op extends string = string, D = unknown> {
+  op: Op;
+  d: D;
+}
+
+/** server→client: op `ready` (sent once after a successful `identify`). */
+export interface ReadyPayload {
+  user: PublicUser;
+  channels: never[]; // empty placeholder until M2
+  members: Member[];
+}
+
+/** server→client: op `presence.update`. */
+export interface PresenceUpdatePayload {
+  userId: number;
+  status: PresenceStatus;
+  voiceChannelId: number | null;
+}
+
+/** client→server: op `identify` (the only inbound op in M1). */
+export interface IdentifyPayload {
+  token: string;
+}
+
+/** Discriminated union of every server→client event the gateway emits in M1. */
+export type ServerEvent =
+  | Envelope<"ready", ReadyPayload>
+  | Envelope<"presence.update", PresenceUpdatePayload>;
+
+/** Discriminated union of every client→server command the gateway accepts in M1. */
+export type ClientCommand = Envelope<"identify", IdentifyPayload>;

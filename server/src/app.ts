@@ -4,6 +4,7 @@ import rateLimit from "@fastify/rate-limit";
 import type { Config } from "./config.js";
 import { openDatabase, type Db } from "./db.js";
 import authRoutes from "./routes/auth.js";
+import wsGateway from "./ws/gateway.js";
 import type { PublicUser, SessionRow } from "./types.js";
 
 declare module "fastify" {
@@ -54,6 +55,10 @@ export function buildApp(config: Config): FastifyInstance {
   // Auth REST endpoints (register/login/logout/refresh). Config is passed via the
   // register options so handlers can read the session TTL and rate-limit knobs.
   void app.register(authRoutes, { config });
+
+  // WebSocket gateway (SPEC.md §7): connect-time auth via the first `identify`
+  // frame, `ready` snapshot, and live `presence.update` broadcasts.
+  void app.register(wsGateway, { config });
 
   app.get("/health", async () => ({
     status: "ok",
