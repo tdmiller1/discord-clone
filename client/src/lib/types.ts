@@ -14,3 +14,39 @@ export interface SessionResponse {
   expiresAt: number; // epoch ms
   user: PublicUser;
 }
+
+/* WS gateway frame shapes — mirrors server/src/types.ts + the story-004 WS contract. */
+
+/** Live presence state of a user (SPEC.md §7). */
+export type PresenceStatus = "online" | "offline";
+
+/** A user as it appears in `ready.members`: PublicUser + live presence. */
+export interface Member extends PublicUser {
+  status: PresenceStatus;
+  voiceChannelId: number | null; // always null in M1 (voice arrives M4)
+}
+
+/** server→client: op `ready` (sent once after a successful `identify`). */
+export interface ReadyPayload {
+  user: PublicUser;
+  channels: unknown[]; // always [] in M1 (channels arrive M2 — ignored)
+  members: Member[];
+}
+
+/** server→client: op `presence.update`. */
+export interface PresenceUpdatePayload {
+  userId: number;
+  status: PresenceStatus;
+  voiceChannelId: number | null; // always null in M1 (ignored)
+}
+
+/** Generic realtime WS envelope (SPEC.md §7). */
+export interface Envelope<Op extends string = string, D = unknown> {
+  op: Op;
+  d: D;
+}
+
+/** Discriminated union of every server→client frame the gateway emits in M1. */
+export type ServerFrame =
+  | Envelope<"ready", ReadyPayload>
+  | Envelope<"presence.update", PresenceUpdatePayload>;

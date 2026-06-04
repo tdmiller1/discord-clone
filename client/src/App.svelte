@@ -1,9 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import Login from "./lib/Login.svelte";
+  import Presence from "./lib/Presence.svelte";
   import Register from "./lib/Register.svelte";
   import { logout, validateSession } from "./lib/auth";
   import { store } from "./lib/authStore.svelte";
+  import { gateway } from "./lib/gateway.svelte";
   import { deleteSession, getSession, setSession } from "./lib/session";
 
   type View = "loading" | "register" | "login" | "app";
@@ -38,8 +40,19 @@
   }
 
   async function handleLogout(): Promise<void> {
+    // Tear down the socket explicitly so it can't reconnect during the view switch
+    // (idempotent — Presence's onDestroy also disconnects on unmount).
+    gateway.disconnect();
     const token = store.sessionToken;
     if (token) await logout(store.serverUrl, token);
+    await deleteSession();
+    store.clear();
+    view = "login";
+  }
+
+  /** A 4001 WS close: the session is already dead server-side — clear it + return to login. */
+  async function handleSessionInvalid(): Promise<void> {
+    gateway.clearAuthFailed();
     await deleteSession();
     store.clear();
     view = "login";
@@ -60,21 +73,5 @@
 {:else if view === "login"}
   <Login onAuthed={() => (view = "app")} onShowRegister={() => (view = "register")} />
 {:else}
-  <main>
-    <h1>discord-clone</h1>
-    <p class="tagline">Signed in as {store.currentUser?.username ?? "user"}.</p>
-    <section class="card">
-      <p class="muted">Channels and presence arrive in the next milestone.</p>
-      <div class="row">
-        <button onclick={handleLogout}>Log out</button>
-      </div>
-    </section>
-  </main>
+  <Presence onLogout={handleLogout} onSessionInvalid={handleSessionInvalid} />
 {/if}
-
-<style>
-  .muted {
-    color: var(--muted);
-    margin: 0 0 1rem;
-  }
-</style>
