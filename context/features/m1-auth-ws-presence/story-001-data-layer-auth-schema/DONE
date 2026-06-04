@@ -1,0 +1,25 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| `better-sqlite3` added to `server/` deps; `db` module opens/creates `<dataDir>/app.db`, creating dir if missing | PASS | `server/package.json` deps include `better-sqlite3@^11.8.1`; `server/src/db.ts` `openDatabase` does `mkdirSync(config.dataDir, {recursive:true})` then `new Database(join(config.dataDir,"app.db"))`. Smoke test confirmed file created. |
+| Schema created idempotently (`CREATE TABLE IF NOT EXISTS`) for `users`/`invite_tokens`/`sessions` exactly per SPEC §8 | PASS | `server/src/schema.ts` SCHEMA_SQL; column lists match SPEC §8 exactly. Reopen smoke test confirmed idempotency (no error, 4 tables incl. sqlite_sequence). |
+| `users.username` UNIQUE; indexes on `invite_tokens.token_hash` and `sessions.token_hash` | PASS | `username TEXT NOT NULL UNIQUE`; `idx_invite_tokens_token_hash`, `idx_sessions_token_hash` created. Verified via PRAGMA index_list + sqlite_master at runtime. |
+| Crypto helpers exported: hashPassword/verifyPassword (Argon2id), generateToken (URL-safe), hashToken (SHA-256), shared for invite + session tokens | PASS | `server/src/crypto.ts`. Runtime: hash prefix `$argon2id$v`, verify correct/wrong/malformed = true/false/false (no throw), token 43 chars base64url, hashToken 64 hex deterministic. |
+| `db` handle from Config, reachable by buildApp and CLI, no global singletons/scattered process.env; buildApp(config) split preserved | PASS | `openDatabase(config: Config)` shared factory; `app.ts` decorates `app.db` + onClose close; `index.ts` unchanged (listen+signals only); no process.env reads in new modules. |
+| `npm run typecheck` passes; starting server creates db file + tables | PASS | typecheck exit 0 (server tsc + client svelte-check 0 errors). Runtime smoke test created app.db with all three tables + indexes. |
+| `contracts/data-and-crypto.md` documents table shapes, db module API, hashing scheme | PASS | Contract present with Tables, db module API, schema module API, Crypto helpers, hashing scheme, and 002-004 usage notes — matches implementation. |
+
+Suggested commit message:
+feat(server): add SQLite data layer and auth crypto foundation
+
+Add the first persistence + crypto layer: a better-sqlite3-backed openDatabase(config)
+factory that opens <dataDir>/app.db with WAL + foreign_keys pragmas and idempotently
+applies the M1 users/invite_tokens/sessions schema (SPEC §8), plus a crypto module with
+Argon2id password hashing and SHA-256 token hashing/generation. The db is decorated onto
+the Fastify instance via buildApp; the shared factory is reusable by the admin CLI.
+
+Story: /home/tucker/Repos/discord-clone/context/features/m1-auth-ws-presence/story-001-data-layer-auth-schema
