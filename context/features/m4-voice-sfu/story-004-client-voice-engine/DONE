@@ -1,0 +1,37 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+| # | Criterion | Result | Evidence |
+|---|-----------|--------|----------|
+| 1 | mediasoup-client added; reactive engine in *.svelte.ts runes module with one teardown point | PASS | client/package.json:16 ("mediasoup-client":"^3.7.0"); voice.svelte.ts module-level $state (38-43) + non-reactive SDK locals (46-61); single teardown() (391-426) |
+| 2 | Join: getUserMedia, Device.load(rtpCapabilities), send+recv transports, wire connect/produce over WS, produce Opus mic track | PASS | voice.svelte.ts join() 285-360: getUserMedia 294; device.load 331-335; buildTransport send/recv 338-341; wireTransport connect/produce 111-138; sendTransport.produce 346 |
+| 3 | Consume every existing + each new producer; attach remote tracks to <audio>; handle producer-closed/peer-leave by closing consumer + dropping audio | PASS | consumeProducer for joined.producers (350-352) + voice.new_producer (238-239); onConsumer builds MediaStream+Audio (176-184); dropParticipant on voice.peer_left (198-212, 241-242) |
+| 4 | Mute toggle pauses producer + sends voice.state{muted}; unmute resumes; optional deafen mutes inbound; rapid toggles converge | PASS | toggleMute 364-371 (state set before send → convergent); toggleDeafen 374-378 mutes audio.muted |
+| 5 | Leave/teardown: voice.leave + close producer/consumers/transports + stop mic; WS disconnect/auth-fail also tears down cleanly; no dangling streams/transports | PASS | teardown(notify) 391-426; gateway.disconnect() invokes voiceTeardownHandler (229); 4001 onclose invokes it (185); App handleLogout/handleSessionInvalid (48,61) |
+| 6 | Mic-permission denial + transport failed/disconnected surfaced as reactive error/conn state (not thrown); leave still cleans up | PASS | getUserMedia catch → error+idle, no half-join (293-300); connectionstatechange failed/disconnected → error+status (132-137); errback on socket-closed (114,124) |
+| 7 | npm run typecheck (incl. svelte-check) passes; two clients → audible two-way audio, working mute, clean leave | PASS (typecheck) / UNTESTABLE (runtime) | typecheck: 0 errors (pre-existing unrelated MessagePane fileInput warning only). Two-client+mic runtime path present and correct — see manual steps below |
+| 8 | contracts/voice-store.md documents reactive API (status, voiceChannelId, participants, muted/deafened, error, join/leave/toggleMute/toggleDeafen) | PASS | contracts/voice-store.md present, documents all getters + actions; matches voice.svelte.ts exported singleton (434-480) |
+
+Manual verification steps for AC #7 (runtime, two clients + mic):
+1. Seed a voice channel (story 001) and start the server (npm run docker:up).
+2. Launch two clients (npm run dev:client), register/login as two users.
+3. Both call voice.join(voiceChannelId); grant mic permission in each.
+4. Confirm audible two-way audio (each hears the other).
+5. toggleMute() on client A → client B stops hearing A; unmute restores. Rapid toggles converge.
+6. toggleDeafen() on A → A stops hearing B locally; peers see deafen flag.
+7. leave() on A → mic indicator off, B receives voice.peer_left and drops A's audio; no dangling streams/transports.
+8. Logout / 4001 auth-fail on B → voice tears down cleanly.
+
+Suggested commit message:
+feat(client): mediasoup-client voice engine (publish/consume/mute)
+
+Add a reactive voice.svelte.ts runes engine that captures the mic, drives the
+full mediasoup-client Device/Transport/Producer/Consumer SFU negotiation over
+the existing /ws gateway socket via a narrow sendVoice/onVoiceFrame/
+onVoiceTeardown seam, and exposes a UI-facing store (status, voiceChannelId,
+participants, muted/deafened, error, join/leave/toggleMute/toggleDeafen) per
+contracts/voice-store.md. Thread voiceChannelId through presence.update; wire
+voice teardown into gateway disconnect()/4001 and App logout/session-invalid.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
