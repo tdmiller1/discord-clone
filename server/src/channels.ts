@@ -66,6 +66,41 @@ export function listChannels(db: Db): ChannelRow[] {
     .all() as ChannelRow[];
 }
 
+/**
+ * Returns the single seeded voice channel (the v1 single-room invariant
+ * guarantees at most one, SPEC.md §13.3), or `undefined` before seeding. Doubles
+ * as the typed `text` vs `voice` lookup and the story-003 single-room resolver.
+ */
+export function getVoiceChannel(db: Db): ChannelRow | undefined {
+  return db
+    .prepare("SELECT * FROM channels WHERE type = 'voice' ORDER BY position, id LIMIT 1")
+    .get() as ChannelRow | undefined;
+}
+
+/**
+ * Idempotently ensures exactly one `type:"voice"` channel exists and returns it
+ * (the canonical voice row). CREATE-if-absent: a restart finds the existing row
+ * via {@link getVoiceChannel} and inserts nothing, so a restart does not create a
+ * second one. The seeded row is `{ name: "Voice", type: "voice", createdBy: null,
+ * position: nextChannelPosition(db) }` (`null` creator reserved for system-seeded
+ * channels). The check-then-insert is wrapped in a transaction so concurrent boot
+ * writers cannot race a second insert.
+ */
+export function seedVoiceChannel(db: Db): ChannelRow {
+  return db.transaction(() => {
+    const existing = getVoiceChannel(db);
+    if (existing !== undefined) {
+      return existing;
+    }
+    return createChannel(db, {
+      name: "Voice",
+      type: "voice",
+      position: nextChannelPosition(db),
+      createdBy: null,
+    });
+  })();
+}
+
 /** Inserts a message and returns the persisted row. */
 export function insertMessage(
   db: Db,
