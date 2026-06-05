@@ -1,0 +1,89 @@
+# PRODUCTION deploy compose.
+#
+# This file PULLS the published server image from GHCR (it does NOT build from
+# source) and fronts it with Caddy for automatic Let's Encrypt TLS, so that one
+# `docker compose up -d` yields a working HTTPS/WSS server with voice.
+#
+# For local development / contributing, use the root `docker-compose.yml`
+# instead — that one builds the server from `./server` and wires up the
+# Cloudflare tunnel + hosted web client.
+#
+# Bring-up:  cd deploy && cp .env.example .env && $EDITOR .env && docker compose up -d
+# Env vars are read from `deploy/.env` (auto-loaded by Compose from this dir).
+
+services:
+  # The application server, pulled from GHCR (story 002 image contract). The
+  # image already EXPOSEs 8080, declares VOLUME /data, and ships a HEALTHCHECK
+  # hitting /health; we only override the deploy-specific env, mount the data
+  # volume, and publish the UDP media range.
+  server:
+    image: ghcr.io/tdmiller1/discord-clone-server:${SERVER_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HTTP_PORT: "8080"
+      DATA_DIR: /data
+      # Public routable IPv4/hostname the SFU advertises to clients as the
+      # WebRTC ICE announce address (SPEC.md §11). REQUIRED: `up` fails fast if
+      # unset — NEVER localhost in prod, or remote voice silently breaks while
+      # text/health still look fine.
+      PUBLIC_HOST: ${PUBLIC_HOST:?set PUBLIC_HOST to the real routable host (never localhost)}
+      # Extra ICE candidate IPs (comma-separated), e.g. the host's LAN IP. Each
+      # extra IP consumes an additional UDP port per transport from the range below.
+      RTC_EXTRA_ANNOUNCED_IPS: ${RTC_EXTRA_ANNOUNCED_IPS:-}
+      # UDP media range. MUST equal the `ports:` UDP mapping below (CLAUDE.md
+      # gotcha). Canonical range 40000-40010 — keep these two in sync, and in
+      # sync with server/.env.example and the dev compose.
+      RTC_MIN_PORT: "40000"
+      RTC_MAX_PORT: "40010"
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-10}
+      SESSION_TTL: ${SESSION_TTL:-604800}
+      AUTH_RATE_MAX: ${AUTH_RATE_MAX:-10}
+      AUTH_RATE_WINDOW_MS: ${AUTH_RATE_WINDOW_MS:-60000}
+    # HTTP 8080 is NOT host-published in prod — only Caddy is internet-facing and
+    # reaches the server over the internal compose network at `server:8080`.
+    # (The dev compose publishes "8080:8080" directly; prod keeps it internal.)
+    expose:
+      - "8080"
+    ports:
+      # UDP media range for the SFU. MUST match RTC_MIN_PORT-RTC_MAX_PORT above
+      # (CLAUDE.md gotcha). This is raw DTLS-SRTP and reaches the container
+      # directly — it does NOT go through Caddy and must also be allowed by the
+      # host firewall + router UDP-forwarded to PUBLIC_HOST.
+      - "40000-40010:40000-40010/udp"
+    volumes:
+      # SQLite + uploaded images. Persistent so data survives restarts.
+      - discord-data:/data
+
+  # Caddy terminates HTTPS/WSS and reverse-proxies everything (/, /health,
+  # /api/*, attachments, and the /ws gateway incl. voice signaling) to the
+  # server over the internal network. `reverse_proxy` forwards the WebSocket
+  # upgrade automatically — no manual header config required. Caddy provisions
+  # and renews a Let's Encrypt cert for $CADDY_SITE.
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+      - "443:443"
+      # Uncomment to enable HTTP/3 (QUIC) over UDP/443:
+      # - "443:443/udp"
+    environment:
+      # The public domain Caddy serves TLS for (e.g. discord.example.com). Its
+      # DNS A/AAAA record MUST point to this host for Let's Encrypt to issue.
+      CADDY_SITE: ${CADDY_SITE:?set CADDY_SITE to your public domain (DNS must point here)}
+      # ACME account / expiry-notice email (optional; Caddy issues without it).
+      CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # ACME account + issued certs. Persistent so certs survive `down/up` and
+      # avoid Let's Encrypt rate limits.
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  discord-data:
+  caddy-data:
+  caddy-config:
