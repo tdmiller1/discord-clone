@@ -8,6 +8,7 @@
   import { channelStore } from "./lib/channelStore.svelte";
   import { gateway } from "./lib/gateway.svelte";
   import { deleteSession, getSession, setSession } from "./lib/session";
+  import { clearCache as clearAttachmentImages } from "./lib/attachmentImages";
 
   type View = "loading" | "register" | "login" | "app";
 
@@ -45,6 +46,7 @@
     // (idempotent — Presence's onDestroy also disconnects on unmount).
     gateway.disconnect();
     channelStore.clear();
+    clearAttachmentImages();
     const token = store.sessionToken;
     if (token) await logout(store.serverUrl, token);
     await deleteSession();
@@ -56,6 +58,7 @@
   async function handleSessionInvalid(): Promise<void> {
     gateway.clearAuthFailed();
     channelStore.clear();
+    clearAttachmentImages();
     await deleteSession();
     store.clear();
     view = "login";
