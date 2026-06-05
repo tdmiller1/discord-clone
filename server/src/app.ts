@@ -12,6 +12,7 @@ import channelRoutes from "./routes/channels.js";
 import attachmentRoutes from "./routes/attachments.js";
 import wsGateway from "./ws/gateway.js";
 import { BroadcastHub } from "./ws/hub.js";
+import { VoiceRegistry } from "./ws/voice-registry.js";
 import { VoiceSfu } from "./voice/sfu.js";
 import type { Envelope, PublicUser, SessionRow } from "./types.js";
 
@@ -71,12 +72,17 @@ export async function buildApp(config: Config): Promise<FastifyInstance> {
 
   // mediasoup SFU core (SPEC.md §11): one worker + Opus router, constructed once and
   // shared. Async-initialized here so a worker bind failure fails the boot fast. The
-  // gateway is wired to it in story 003; this story only constructs and disposes it.
+  // gateway relays it for the `voice.*` ops (story 003).
   const sfu = new VoiceSfu(config);
   await sfu.init();
   app.addHook("onClose", async () => {
     await sfu.close();
   });
+
+  // In-memory voice-membership registry (mirrors PresenceRegistry): tracks each
+  // socket's live `voiceChannelId` and reports per-user join/leave transitions so
+  // the gateway broadcasts `presence.update` and `buildReady` reports live voice.
+  const voice = new VoiceRegistry();
 
   // Rate limiting, registered non-global so only the opted-in auth routes
   // (register/login) are throttled; authenticated traffic is untouched (SPEC.md §12).
@@ -105,7 +111,7 @@ export async function buildApp(config: Config): Promise<FastifyInstance> {
 
   // WebSocket gateway (SPEC.md §7): connect-time auth via the first `identify`
   // frame, `ready` snapshot, and live `presence.update` broadcasts.
-  void app.register(wsGateway, { config, hub });
+  void app.register(wsGateway, { config, hub, sfu, voice });
 
   app.get("/health", async () => ({
     status: "ok",

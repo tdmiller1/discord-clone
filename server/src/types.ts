@@ -163,7 +163,7 @@ export type PresenceStatus = "online" | "offline";
 /** A user as it appears in `ready.members`: PublicUser + live presence. */
 export interface Member extends PublicUser {
   status: PresenceStatus;
-  voiceChannelId: number | null; // always null in M1 (voice arrives M4)
+  voiceChannelId: number | null; // live voice channel from VoiceRegistry (M4)
 }
 
 /** Generic realtime WS envelope (SPEC.md §7). */
@@ -208,14 +208,147 @@ export interface ChannelCreatePayload {
   channel: PublicChannel;
 }
 
+// ---------- voice: client → server (SPEC.md §7/§11; M4 story 003) ----------
+//
+// mediasoup param objects (`dtlsParameters`, `rtpParameters`, `rtpCapabilities`)
+// are passed through verbatim to the SFU, which owns their concrete types. They
+// are typed `unknown` at this boundary so the shared `types.ts` does not import
+// `mediasoup`; the gateway validates only that they are non-null objects.
+
+/** client→server: op `voice.join` — request to join the seeded voice channel. */
+export interface VoiceJoinPayload {
+  channelId: number;
+}
+
+/** client→server: op `voice.transport` — request a send|recv WebRtcTransport. */
+export interface VoiceTransportRequestPayload {
+  direction: "send" | "recv";
+}
+
+/** client→server: op `voice.connect` — complete DTLS for a transport. */
+export interface VoiceConnectPayload {
+  direction: "send" | "recv";
+  dtlsParameters: unknown;
+}
+
+/** client→server: op `voice.produce` — publish the mic track. */
+export interface VoiceProducePayload {
+  rtpParameters: unknown;
+}
+
+/** client→server: op `voice.consume` — consume a remote producer (server replies paused). */
+export interface VoiceConsumePayload {
+  producerId: string;
+  rtpCapabilities: unknown;
+}
+
+/** client→server: op `voice.resume` — resume a previously-consumed producer post-handshake. */
+export interface VoiceResumePayload {
+  producerId: string;
+}
+
+/** client→server: op `voice.state` — mute/deafen toggle. `deafened` is local playback only. */
+export interface VoiceStatePayload {
+  muted: boolean;
+  deafened?: boolean;
+}
+
+/** client→server: op `voice.leave` — leave the voice channel (no fields). */
+export type VoiceLeavePayload = Record<string, never>;
+
+// ---------- voice: server → client ----------
+
+/** server→client: op `voice.joined` — ack of `voice.join`: router caps + existing producers. */
+export interface VoiceJoinedPayload {
+  channelId: number;
+  participantId: string;
+  rtpCapabilities: unknown;
+  producers: { participantId: string; producerId: string }[];
+}
+
+/** server→client: op `voice.transport` — created transport params (Device.create*Transport). */
+export interface VoiceTransportPayload {
+  direction: "send" | "recv";
+  id: string;
+  iceParameters: unknown;
+  iceCandidates: unknown;
+  dtlsParameters: unknown;
+}
+
+/** server→client: op `voice.connected` — ack of `voice.connect`. */
+export interface VoiceConnectedPayload {
+  direction: "send" | "recv";
+}
+
+/** server→client: op `voice.produced` — ack of `voice.produce`: this socket's producer id. */
+export interface VoiceProducedPayload {
+  producerId: string;
+}
+
+/** server→client: op `voice.consumer` — consume params (transport.consume input); created paused. */
+export interface VoiceConsumerPayload {
+  id: string;
+  producerId: string;
+  kind: "audio";
+  rtpParameters: unknown;
+}
+
+/** server→client: op `voice.resumed` — ack of `voice.resume`. */
+export interface VoiceResumedPayload {
+  producerId: string;
+}
+
+/** server→client: op `voice.new_producer` — a peer started producing; consume it. */
+export interface VoiceNewProducerPayload {
+  participantId: string;
+  producerId: string;
+}
+
+/** server→client: op `voice.peer_left` — a peer left/disconnected; drop its consumer/<audio>. */
+export interface VoicePeerLeftPayload {
+  participantId: string;
+}
+
+/** server→client: op `voice.state` — a peer's mute/deafen changed (relay). */
+export interface VoiceStateUpdatePayload {
+  userId: number;
+  participantId: string;
+  muted: boolean;
+  deafened: boolean;
+}
+
+/** server→client: op `voice.error` — a voice op failed (never closes the socket). */
+export interface VoiceErrorPayload {
+  op: string;
+  message: string;
+}
+
 /** Discriminated union of every server→client event the gateway emits. */
 export type ServerEvent =
   | Envelope<"ready", ReadyPayload>
   | Envelope<"presence.update", PresenceUpdatePayload>
   | Envelope<"message.create", MessageCreatePayload>
-  | Envelope<"channel.create", ChannelCreatePayload>;
+  | Envelope<"channel.create", ChannelCreatePayload>
+  | Envelope<"voice.joined", VoiceJoinedPayload>
+  | Envelope<"voice.transport", VoiceTransportPayload>
+  | Envelope<"voice.connected", VoiceConnectedPayload>
+  | Envelope<"voice.produced", VoiceProducedPayload>
+  | Envelope<"voice.consumer", VoiceConsumerPayload>
+  | Envelope<"voice.resumed", VoiceResumedPayload>
+  | Envelope<"voice.new_producer", VoiceNewProducerPayload>
+  | Envelope<"voice.peer_left", VoicePeerLeftPayload>
+  | Envelope<"voice.state", VoiceStateUpdatePayload>
+  | Envelope<"voice.error", VoiceErrorPayload>;
 
 /** Discriminated union of every client→server command the gateway accepts. */
 export type ClientCommand =
   | Envelope<"identify", IdentifyPayload>
-  | Envelope<"message.send", MessageSendPayload>;
+  | Envelope<"message.send", MessageSendPayload>
+  | Envelope<"voice.join", VoiceJoinPayload>
+  | Envelope<"voice.transport", VoiceTransportRequestPayload>
+  | Envelope<"voice.connect", VoiceConnectPayload>
+  | Envelope<"voice.produce", VoiceProducePayload>
+  | Envelope<"voice.consume", VoiceConsumePayload>
+  | Envelope<"voice.resume", VoiceResumePayload>
+  | Envelope<"voice.state", VoiceStatePayload>
+  | Envelope<"voice.leave", VoiceLeavePayload>;
