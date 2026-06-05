@@ -2,8 +2,8 @@
 name: M2 — Text Channels
 description: Create text channels and send/receive plain-text messages live over the WS gateway, with persisted history that survives reload.
 type: feature
-status: planned
-completed_date:
+status: done
+completed_date: 2026-06-04
 ---
 
 # Feature: M2 — Text Channels
@@ -46,8 +46,8 @@ Deliver the M2 acceptance loop from `SPEC.md §14`: any member can **create a te
 
 | # | Story Directory | Title | Status |
 |---|----------------|-------|--------|
-| 1 | story-001-channels-messages-schema | Server data layer: channels & messages | TODO |
-| 2 | story-002-messaging-gateway | WS gateway: message.send, broadcasts & ready.channels | TODO |
-| 3 | story-003-channels-rest-api | REST API: create channel & message history | TODO |
-| 4 | story-004-client-channel-list | Client: channel list, selection & create-channel | TODO |
-| 5 | story-005-client-message-pane | Client: message history, composer & live updates | TODO |
+| 1 | story-001-channels-messages-schema | Server data layer: channels & messages | COMPLETE |
+| 2 | story-002-messaging-gateway | WS gateway: message.send, broadcasts & ready.channels | COMPLETE |
+| 3 | story-003-channels-rest-api | REST API: create channel & message history | COMPLETE |
+| 4 | story-004-client-channel-list | Client: channel list, selection & create-channel | COMPLETE |
+| 5 | story-005-client-message-pane | Client: message history, composer & live updates | COMPLETE |
