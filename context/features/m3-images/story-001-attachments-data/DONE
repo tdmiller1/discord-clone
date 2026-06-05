@@ -1,0 +1,28 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| `attachments` table created idempotently exactly per SPEC §8; M1/M2 tables undisturbed | PASS | server/src/schema.ts:72-85 — all 10 columns match SPEC.md §8 line 139 exactly (id, message_id, uploader_id, filename, content_type, size, width, height, path, created_at); both FKs declared; verified at runtime created + idempotent re-run on a pre-existing M2 db. |
+| `messages` declares `attachment_id` → `attachments(id)` FK; deferral comment updated; pre-existing-M2 note added | PASS | server/src/schema.ts:59-69 — FK declared; M2 deferral comment replaced with note that pre-existing M2 dbs keep the FK-less column and integrity is enforced in the accessor/gateway layer. |
+| Index on `attachments(message_id)` | PASS | server/src/schema.ts:90 — idx_attachments_message_id; confirmed present at runtime. |
+| `attachments.ts` exports `createAttachment`, `getAttachmentById`, `linkAttachmentToMessage` (link-once) | PASS | server/src/attachments.ts:21,54,69 — link-once via `WHERE id = ? AND message_id IS NULL`, returns `info.changes === 1`. |
+| `channels.ts` reads embed attachments (`getChannelMessages` + single-message read LEFT JOIN) | PASS | server/src/channels.ts:193 (getChannelMessages) and :219 (getMessageWithAttachment) both LEFT JOIN attachments; splitMessageRow yields `{ message, attachment }`. |
+| `types.ts` gains `AttachmentRow`, `PublicAttachment`; `PublicMessage.attachment`; updated mapper | PASS | server/src/types.ts:55 (AttachmentRow), :112 (PublicAttachment), :123 (toPublicAttachment), :142 (PublicMessage.attachment), :146 two-arg toPublicMessage. |
+| New tunables sourced from loadConfig where they don't exist; MAX_UPLOAD_MB/DATA_DIR reused | PASS | No new config this story (deferred to story 002 per plan); existing tunables untouched. |
+| `npm run typecheck` passes; table created against existing M2 db, idempotent, existing messages serialize with `attachment: null` | PASS | typecheck: server tsc --noEmit + client svelte-check both 0 errors. Runtime test confirmed table creation on pre-existing M2 db + idempotency; LEFT JOIN yields null attachment for FK-null rows → toPublicMessage(row, null). Callers updated: routes/channels.ts:98, ws/gateway.ts:223. |
+| `contracts/attachments-data.md` documents table, accessor API, link-once, PublicAttachment, embedding | PASS | contracts/attachments-data.md — covers table shape, messages FK note, accessor API, link-once semantics, PublicAttachment JSON (id-resolves-to-GET rule), PublicMessage embedding, two-arg mapper, usage notes for 002/003/005. |
+
+Suggested commit message:
+feat(server): add attachments data layer (table, accessors, message embedding)
+
+Add SQLite attachments table per SPEC.md §8 with idx_attachments_message_id,
+declare the messages.attachment_id FK, introduce attachments.ts accessors
+(createAttachment, getAttachmentById, linkAttachmentToMessage with link-once
+semantics), and embed attachment: PublicAttachment | null into PublicMessage
+via a LEFT JOIN read path (getChannelMessages, getMessageWithAttachment) and a
+two-arg toPublicMessage mapper. Read/embed wired through the history route and
+gateway broadcast (value null until story 003). Includes contracts/attachments-data.md.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
