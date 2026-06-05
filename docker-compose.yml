@@ -18,5 +18,18 @@ services:
       - discord-data:/data
     restart: unless-stopped
 
+  # Cloudflare Tunnel connector. Exposes the server publicly without opening any
+  # inbound ports. The tunnel is remotely-managed: its public-hostname -> service
+  # mapping lives in the Cloudflare dashboard and must point at http://server:8080
+  # (the Compose service name + HTTP_PORT) — NOT localhost, since this container
+  # can't see the host's localhost. Token is read from the root .env (gitignored).
+  # NOTE: only HTTP/WS traverse the tunnel; WebRTC voice (UDP 40000-40010) does not.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    restart: unless-stopped
+    depends_on:
+      - server
+
 volumes:
   discord-data:
