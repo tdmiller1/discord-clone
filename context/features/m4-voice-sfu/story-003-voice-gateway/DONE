@@ -1,0 +1,28 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| Gateway handles client→server voice ops on already-authed sockets via `{op,d}` envelope (`voice.join/leave/state` + negotiation ops); unknown/invalid frames ignored safely, nothing crashes | PASS | Post-auth `voice.*` dispatch at gateway.ts:508-515 routes into `handleVoice` (gateway.ts:199-404); pre-auth gate at 455-502 means voice ops only run authed. Each branch validates `d` defensively and `return`s on malformed input; unknown `voice.*` falls to `default: return` (gateway.ts:401). Negotiation set (`voice.transport/connect/produce/consume/resume`) documented in contract. |
+| `voice.join` validates the seeded `type:"voice"` channel; text/unknown rejected with no SFU resources; returns router caps + transport negotiation path | PASS | `getVoiceChannel(db)` id check at gateway.ts:207-214 — mismatch sends `voice.error` and returns before any SFU call. Success sends `voice.joined` with `sfu.getRtpCapabilities()` + producer list (gateway.ts:227-235); transports created lazily via `voice.transport`/`voice.connect` (gateway.ts:252-288). |
+| Bidirectional consume wiring (newcomer consumes all existing; peers consume the new producer) | PASS | Newcomer gets `producers: sfu.listProducers(channelId, participantId)` in `voice.joined` (gateway.ts:233); `voice.produce` broadcasts `voice.new_producer` to other room sockets (gateway.ts:306-313). |
+| `voice.state {muted}` pauses/resumes producer; state reflected to others | PASS | gateway.ts:374-378 pause/resumeProducer; `voice.state` relayed to room peers with userId/participantId/muted/deafened (gateway.ts:380-392). |
+| Voice presence registry tracks per-socket `voiceChannelId`; join/leave broadcast `presence.update` on transition; `buildReady` reports live `voiceChannelId` | PASS | `VoiceRegistry` (voice-registry.ts) mirrors PresenceRegistry's transition model (`add`→`{firstInVoice}`, `remove`→`{lastInVoice,channelId}`, `voiceChannelOf`). Join broadcasts presence.update on `firstInVoice` (gateway.ts:236-248); `buildReady` uses `voice.voiceChannelOf(row.id)` (gateway.ts:116), replacing hardcoded null. |
+| Teardown closes SFU resources, removes from room, clears `voiceChannelId`, broadcasts presence.update, tells peers to drop consumer; multi-socket safe | PASS | Shared `leaveVoice()` (gateway.ts:167-190): `sfu.closeParticipant`, `voice.peer_left` to peers, clears `voiceChannelId`, presence.update on `lastInVoice`. Called from `voice.leave` (gateway.ts:397) and inside `teardown()` (gateway.ts:417), covering close/error/heartbeat-reap. Per-socket participantId + per-user registry aggregation make multi-socket safe. |
+| `npm run typecheck` passes; `voice.join` returns valid negotiation params and presence shows in voice | PASS (typecheck) / UNTESTABLE (live media) | `npm run typecheck` passes — 0 errors (1 pre-existing unrelated M3 svelte-check warning in MessagePane.svelte). Verifying live negotiation params and in-voice presence over the wire requires real mediasoup-client/websocat sessions; code path present and correct. Manual: connect two authed WS clients, send `identify` then `voice.join {channelId}`, confirm `voice.joined` with rtpCapabilities/producers and that the other client sees `presence.update {voiceChannelId}`. |
+| `contracts/voice-protocol.md` specifies every op, negotiation sequence, new/closed-producer notifications, and presence.update.voiceChannelId semantics | PASS | Contract present and complete: all 8 c→s + 10 s→c ops with `d` shapes, the join→transport→connect→produce→consume→resume ASCII sequence, `voice.new_producer`/`voice.peer_left` semantics, mute/deafen, presence.update.voiceChannelId per-user transition semantics, and teardown guarantees. |
+
+Suggested commit message:
+feat(voice): wire voice.* signaling and voice presence into WS gateway
+
+Thread the prebuilt VoiceSfu and a new VoiceRegistry into the gateway,
+adding authed voice.join/transport/connect/produce/consume/resume/state/leave
+ops over the {op,d} envelope. Bidirectional consume fan-out (voice.joined
+producer list + voice.new_producer), mute via producer pause/resume, live
+voiceChannelId presence (first-in/last-out transitions, buildReady), and a
+shared leaveVoice() teardown reached on leave/close/error/heartbeat-reap.
+Add voice payload types and the voice-protocol wire contract for story 004.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
