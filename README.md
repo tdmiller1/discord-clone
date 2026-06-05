@@ -38,7 +38,7 @@ This stands up a public **HTTPS/WSS** server with text, inline images, and voice
 installing the client and confirming everything works end-to-end. If you're building from
 source instead, see **[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)** — not this section.
 
-Examples below use `<version>` placeholders; the first release is `0.2.0` (tag `v0.2.0`).
+Examples below use `<version>` placeholders; the current release is `0.2.1` (tag `v0.2.1`).
 Substitute the version you're deploying.
 
 ### Prerequisites
@@ -71,7 +71,7 @@ Set these in `deploy/.env`:
   images, and `/health` still look fine).
 - `CADDY_SITE` — **required.** The public domain Caddy serves TLS for (e.g.
   `discord.example.com`). Its DNS must resolve to this host before bring-up.
-- `SERVER_IMAGE_TAG` — optional, defaults to `latest`. **Pin a released version (e.g. `0.2.0`)
+- `SERVER_IMAGE_TAG` — optional, defaults to `latest`. **Pin a released version (e.g. `0.2.1`)
   in prod** rather than tracking `latest`.
 - `CADDY_ACME_EMAIL` — optional. ACME account / cert-expiry email.
 
@@ -133,7 +133,7 @@ The token is single-use and printed once — copy it, then hand it to the user. 
 Each release attaches the client installers to a GitHub Release:
 
 - This version: `https://github.com/tdmiller1/discord-clone/releases/tag/v<version>`
-  (e.g. `https://github.com/tdmiller1/discord-clone/releases/tag/v0.2.0`)
+  (e.g. `https://github.com/tdmiller1/discord-clone/releases/tag/v0.2.1`)
 - Latest: `https://github.com/tdmiller1/discord-clone/releases/latest`
 
 Pick the asset for your OS by exact filename:
@@ -145,8 +145,8 @@ Pick the asset for your OS by exact filename:
 | Linux | AppImage (portable) | `discord-clone_<version>_amd64.AppImage` | `chmod +x` then run directly |
 | Linux | Debian package | `discord-clone_<version>_amd64.deb` | `sudo apt install ./<file>.deb` |
 
-For `v0.2.0` those are `discord-clone_0.2.0_x64_en-US.msi`, `discord-clone_0.2.0_x64-setup.exe`,
-`discord-clone_0.2.0_amd64.AppImage`, and `discord-clone_0.2.0_amd64.deb`. **amd64 / x64 only**
+For `v0.2.1` those are `discord-clone_0.2.1_x64_en-US.msi`, `discord-clone_0.2.1_x64-setup.exe`,
+`discord-clone_0.2.1_amd64.AppImage`, and `discord-clone_0.2.1_amd64.deb`. **amd64 / x64 only**
 — there are no arm64 or macOS builds.
 
 > **Installers are unsigned.** Expect a Windows SmartScreen warning ("Windows protected your
