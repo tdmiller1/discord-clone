@@ -3,8 +3,8 @@ import type { Database } from "better-sqlite3";
 /**
  * Idempotent SQLite DDL for the M1 auth tables and the M2 `channels`/`messages`
  * tables (SPEC.md §8). Run on every {@link ./db.ts openDatabase} so a fresh
- * deploy or a repeated startup converges to the same schema. The `attachments`
- * table is still deferred to M3.
+ * deploy or a repeated startup converges to the same schema. The M3
+ * `attachments` table (SPEC.md §8) lands in this schema.
  *
  * Timestamps are stored as unix epoch milliseconds (`Date.now()`); booleans as
  * 0/1 integers.
@@ -56,21 +56,41 @@ CREATE TABLE IF NOT EXISTS messages (
   channel_id INTEGER NOT NULL,
   author_id INTEGER NOT NULL,
   content TEXT NOT NULL,
-  -- attachment_id: nullable, NO FOREIGN KEY. The 'attachments' table is M3;
-  -- under PRAGMA foreign_keys = ON a FK to a missing table errors on open.
-  -- The FK is added when 'attachments' lands (M3).
+  -- attachment_id: nullable FK → attachments(id) (declared below; SQLite
+  -- resolves FK targets lazily within a single db.exec, so the forward
+  -- reference is fine). NOTE: a pre-existing M2 database already has this
+  -- table, so CREATE TABLE IF NOT EXISTS is a no-op there and the column
+  -- stays FK-less (SQLite cannot ALTER ... ADD CONSTRAINT) — integrity is
+  -- enforced in the accessor/gateway layer (link-once + ownership checks).
   attachment_id INTEGER,
   created_at INTEGER NOT NULL,
   FOREIGN KEY (channel_id) REFERENCES channels(id),
-  FOREIGN KEY (author_id) REFERENCES users(id)
+  FOREIGN KEY (author_id) REFERENCES users(id),
+  FOREIGN KEY (attachment_id) REFERENCES attachments(id)
+);
+
+CREATE TABLE IF NOT EXISTS attachments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id INTEGER,
+  uploader_id INTEGER NOT NULL,
+  filename TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  width INTEGER,
+  height INTEGER,
+  path TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (message_id) REFERENCES messages(id),
+  FOREIGN KEY (uploader_id) REFERENCES users(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_invite_tokens_token_hash ON invite_tokens(token_hash);
 CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash);
 CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages(channel_id, id);
+CREATE INDEX IF NOT EXISTS idx_attachments_message_id ON attachments(message_id);
 `;
 
-/** Applies the M1/M2 schema (idempotent). Safe to call on every open and from the CLI/tests. */
+/** Applies the M1/M2/M3 schema (idempotent). Safe to call on every open and from the CLI/tests. */
 export function applySchema(db: Database): void {
   db.exec(SCHEMA_SQL);
 }

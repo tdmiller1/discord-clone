@@ -52,6 +52,19 @@ export interface MessageRow {
   created_at: number;
 }
 
+export interface AttachmentRow {
+  id: number;
+  message_id: number | null;
+  uploader_id: number;
+  filename: string;
+  content_type: string;
+  size: number;
+  width: number | null;
+  height: number | null;
+  path: string;
+  created_at: number; // epoch ms
+}
+
 /** The user shape returned to clients — never includes `password_hash`. */
 export interface PublicUser {
   id: number;
@@ -91,23 +104,55 @@ export function toPublicChannel(row: ChannelRow): PublicChannel {
   };
 }
 
+/**
+ * An attachment as returned to clients (embedded in `PublicMessage`). Exposes
+ * `id`, not a baked URL: the download is auth-checked, so the client resolves the
+ * bytes itself via `GET /api/attachments/:id` (SPEC.md §10).
+ */
+export interface PublicAttachment {
+  id: number;
+  messageId: number | null;
+  filename: string;
+  contentType: string;
+  size: number;
+  width: number | null;
+  height: number | null;
+  createdAt: number;
+}
+
+export function toPublicAttachment(row: AttachmentRow): PublicAttachment {
+  return {
+    id: row.id,
+    messageId: row.message_id,
+    filename: row.filename,
+    contentType: row.content_type,
+    size: row.size,
+    width: row.width,
+    height: row.height,
+    createdAt: row.created_at,
+  };
+}
+
 /** A message as returned to clients (message.create, history fetch). */
 export interface PublicMessage {
   id: number;
   channelId: number;
   authorId: number;
   content: string;
-  attachmentId: number | null;
+  attachment: PublicAttachment | null;
   createdAt: number;
 }
 
-export function toPublicMessage(row: MessageRow): PublicMessage {
+export function toPublicMessage(
+  row: MessageRow,
+  attachment: AttachmentRow | null,
+): PublicMessage {
   return {
     id: row.id,
     channelId: row.channel_id,
     authorId: row.author_id,
     content: row.content,
-    attachmentId: row.attachment_id,
+    attachment: attachment ? toPublicAttachment(attachment) : null,
     createdAt: row.created_at,
   };
 }
@@ -146,7 +191,7 @@ export interface IdentifyPayload {
   token: string;
 }
 
-/** client→server: op `message.send` (attachmentId is ignored in M2, stored NULL). */
+/** client→server: op `message.send` (`attachmentId` linking is honored by M3 story 003). */
 export interface MessageSendPayload {
   channelId: number;
   content: string;
