@@ -1,0 +1,24 @@
+Validated: 2026-06-04
+Branch: feat/public-deploy-tunnel-web-voice
+
+Acceptance Criteria:
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| Production compose artifact pulls the published image instead of `build:` | PASS | deploy/docker-compose.yml:20 `image: ghcr.io/tdmiller1/discord-clone-server:${SERVER_IMAGE_TAG:-latest}`; rendered config confirms NO build:. deploy/.env.example present. Root dev compose left for contributors. |
+| Production env from loadConfig()/§12: real PUBLIC_HOST, DATA_DIR=/data on named volume, MAX_UPLOAD_MB, SESSION_TTL, RTC_MIN/MAX_PORT; values from env file not hard-coded | PASS | deploy/docker-compose.yml:22-42 sets all; PUBLIC_HOST/MAX_UPLOAD_MB/SESSION_TTL from deploy/.env.example. DATA_DIR=/data -> discord-data named volume (:54-56, :87). |
+| UDP media range exposed; compose mapping matches RTC_MIN/MAX_PORT; dev drift resolved to single consistent range with tying comment | PASS | Prod ports 40000-40010/udp (:53) = env 40000/40010 (:37-38). server/.env.example corrected 40100->40010 (:9). All 4 places now 40000-40010 with tying comments. |
+| TLS via Caddy: service + Caddyfile terminates HTTPS, reverse-proxies, passes WS upgrade; notes media UDP bypasses Caddy | PASS | caddy:2 service (:63-84) on 80/443; deploy/Caddyfile:22-24 reverse_proxy server:8080; comments call out WS auto-forward and UDP-bypasses-Caddy. |
+| Internally consistent, labeled PRODUCTION, /data persistent named volume | PASS | Header comment :1-12 labels PRODUCTION and points dev users to root compose. discord-data:/data named volume. config -q validates clean. |
+| Verified to start: /health over proxy + WS gateway accepts (real cert env-dependent) | UNTESTABLE | Requires real public domain + live Let's Encrypt + client over WSS. Wiring correct: Caddy -> server:8080, single origin serves /health, /api/*, wss://.../ws. Documented in deploy-compose.md:160-169. Manual: curl -sf https://{CADDY_SITE}/health and connect to wss://{CADDY_SITE}/ws. |
+| contracts/deploy-compose.md records prod compose + Caddyfile shape, operator env vars (esp. PUBLIC_HOST + UDP range), TLS/WSS/media topology | PASS | contracts/deploy-compose.md present (185 lines): location/services, image selection, env tables, ports/volumes, TLS/WSS/media topology, one-command bring-up, bring-your-own-proxy note. |
+
+Checks:
+- npm run typecheck: PASS (1 pre-existing unrelated warning in MessagePane.svelte)
+- docker compose -f deploy/docker-compose.yml config -q (PUBLIC_HOST+CADDY_SITE set): PASS
+- prod compose fails fast when PUBLIC_HOST unset: PASS (clear message)
+- prod compose fails fast when CADDY_SITE unset: PASS (clear message)
+- root dev docker compose config -q: PASS
+- rendered prod config: image pulled (no build:), 8080 expose-only (not host-published), UDP 40000-40010 published, 3 named volumes, deploy/.env gitignored.
+
+Suggested commit message:
+feat(deploy): production compose that pulls GHCR image + Caddy TLS/WSS
