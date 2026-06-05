@@ -1,0 +1,16 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| @fastify/multipart in package.json + registered in buildApp with size limit from config.maxUploadMb | PASS | server/package.json:21; app.ts:96-98 limits.fileSize = config.maxUploadMb*1024*1024, files:1 |
+| POST /api/attachments Bearer, byte-sniffs MIME, enforces cap, probes w/h, writes DATA_DIR/images/<id>, records row uploader_id + message_id NULL, 201 | PASS | attachments.ts:41-108; requireAuth; sniffImage (images.ts); createAttachment with placeholder path -> images/<id>; 201 toPublicAttachment |
+| GET /api/attachments/:id Bearer streams stored Content-Type + Content-Length; unknown id 404; file-missing clean 404 | PASS | attachments.ts:110-130; getAttachmentById undefined->404; fs.stat catch->404; headers from row; createReadStream |
+| Well-formed validation errors 400/413/401; nothing persisted on rejection | PASS | not_multipart/no_file/invalid_image (400), file_too_large (413), unauthorized (401); write-failure deletes row + fs.rm (attachments.ts:100-104) |
+| Routes inside buildApp as attachmentRoutes, read fastify.db + config, no 2nd connection, path via config | PASS | app.ts:104; app.db + opts.config; imagesDir(config)/join(config.dataDir,row.path) |
+| typecheck passes; curl round-trip; unauth 401; pdf/oversized rejected | PASS (typecheck) / UNTESTABLE (curl manual) | typecheck clean; curl paths verified in code |
+| contracts/attachments-rest-api.md documents both endpoints | PASS | Full contract: method/path/auth/field file/success+error shapes/limits/Content-Type behavior |
+
+Suggested commit message:
+feat(server): add attachments REST API for image upload and auth-checked download
