@@ -1,0 +1,44 @@
+Feature: M2 — Text Channels
+Validated: 2026-06-04
+Branch: main
+
+Stories:
+- story-001-channels-messages-schema ✓
+- story-002-messaging-gateway ✓
+- story-003-channels-rest-api ✓
+- story-004-client-channel-list ✓
+- story-005-client-message-pane ✓
+
+Project-wide checks:
+- npm run typecheck — PASS (server `tsc --noEmit` clean; client svelte-check 121 files, 0 errors, 0 warnings)
+- No test runner configured in this repo; typecheck is the only static gate (per CLAUDE.md).
+
+Docs audit:
+| Doc | Claimed by stories? | Modified in feature branch? | Action |
+|---|---|---|---|
+| server/.env.example | yes (story-001) | yes | ✓ OK |
+| SPEC.md | no (read-only reference) | no | — source of truth; feature implements it |
+| CLAUDE.md | no | no | — |
+| README.md / docs/ | no | no | — |
+
+Advisories (reminders only, no action taken):
+- Schema change: server/src/schema.ts adds `channels`/`messages` tables — already specified in SPEC.md §8.
+- Infra change: server/Dockerfile modified — review deployment docs if any.
+- New route: server/src/routes/channels.ts — candidate addition to a CLAUDE.md quick-reference.
+
+Suggested PR title:
+feat(m2-text-channels): create text channels and send/receive live persisted messages
+
+Suggested PR body:
+Delivers the M2 acceptance loop (SPEC.md §14): any member can create a text channel via
+POST /api/channels, send/receive plain-text messages live across all connected clients over
+the WS gateway (message.send -> persisted -> message.create broadcast), and on reload/relaunch
+see the persisted channel list (ready.channels) and message history (GET /api/channels/:id/messages
+with keyset pagination). Flat membership, ≤10 clients, plain text only; images (M3) and voice (M4)
+remain out of scope.
+
+Next steps:
+- Open the PR.
+- Run /review and /security-review against the PR.
+- (Vault repos) If context/index.md has a hand-curated "In Progress" entry for this feature, remove it.
+- Bump any doc verification dates per Step 5d. (N/A — repo has no last_verified convention.)
