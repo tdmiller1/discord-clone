@@ -1,0 +1,16 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| Active-channel change fetches GET /api/channels/:id/messages?limit=50, renders oldest→newest, resolves author names from members map, degrades to id | PASS | MessagePane.svelte:42-68 fetches limit=50 on activeId change; :57 reverses newest-first page for display; :125-133 keyed `{#each}` renders ascending via gateway.messagesFor; :23-26 authorName falls back displayName→username→String(id) |
+| Composer sends message.send { channelId, content }; input clears; empty/whitespace/over-max prevented client-side | PASS | gateway.svelte.ts:247-250 sends `{ op:"message.send", d:{channelId,content} }`; MessagePane.svelte:96 clears draft on send; :34-38 canSend guard blocks empty/whitespace/over-4000 (matches server MAX_MESSAGE_LENGTH default) |
+| Incoming message.create for active channel appended live; non-active cached without disrupting view; deduped by id | PASS | gateway.svelte.ts:107-111 case message.create upserts; :73-78 inner Map<id,msg> dedupes; state keyed by channelId so only messagesFor(activeId) renders |
+| Older messages loadable via before keyset cursor; latest page renders with "load older" affordance when more exist | PASS | MessagePane.svelte:70-90 loadOlder uses messages[0].id as before cursor; :58/:88 hasMore = length===50; :111-115 button shown when hasMore |
+| Persistence across reload/reconnect: ready.channels + history fetch show channel list and active history | PASS | gateway ready handler seeds channels (existing); $effect re-fetches history on (re)connect; server returns persisted rows (channels.ts:90 ORDER BY id DESC) |
+| Content rendered as plain text; attachments not rendered | PASS | MessagePane.svelte:130 `{msg.content}` auto-escaped, no {@html}/markdown; attachmentId unused in template |
+| npm run typecheck passes; two clients see live + persisted messages | PASS (typecheck) / UNTESTABLE (two-client live) | typecheck: server tsc --noEmit + client svelte-check both 0 errors. Multi-client live propagation requires a running server + two clients — manual verification |
+
+Suggested commit message:
+feat(client): message history pane, composer & live updates (story-005)
