@@ -15,7 +15,7 @@
  * view switch co-located with the rest of App's session handling.
  */
 import { store } from "./authStore.svelte";
-import type { Member, PublicChannel, ServerFrame } from "./types";
+import type { Member, PublicChannel, PublicMessage, ServerFrame } from "./types";
 
 type ConnStatus = "connecting" | "open" | "reconnecting" | "closed";
 
@@ -26,6 +26,7 @@ const WS_PATH = "/ws";
 
 let _members = $state(new Map<number, Member>());
 let _channels = $state(new Map<number, PublicChannel>());
+let _messages = $state(new Map<number, Map<number, PublicMessage>>());
 let _status = $state<ConnStatus>("closed");
 let _authFailed = $state(false);
 
@@ -67,6 +68,15 @@ function isServerFrame(value: unknown): value is ServerFrame {
   );
 }
 
+/** Upsert one message into its channel's id-keyed map (dedupe by id), then reassign the
+ * outer map so derived reads recompute (Svelte 5 Maps aren't deeply reactive). */
+function upsertMessage(channelId: number, msg: PublicMessage): void {
+  const inner = _messages.get(channelId) ?? new Map<number, PublicMessage>();
+  inner.set(msg.id, msg);
+  _messages.set(channelId, inner);
+  _messages = new Map(_messages);
+}
+
 function handleFrame(frame: ServerFrame): void {
   switch (frame.op) {
     case "ready": {
@@ -92,6 +102,11 @@ function handleFrame(frame: ServerFrame): void {
       // Dedupe by id (the creator's own socket + the 201 response can both deliver it).
       _channels.set(frame.d.channel.id, frame.d.channel);
       _channels = new Map(_channels); // reassign to recompute the derived list
+      break;
+    }
+    case "message.create": {
+      // Upsert by id — a history/live race renders each message once.
+      upsertMessage(frame.d.message.channelId, frame.d.message);
       break;
     }
     default:
@@ -200,6 +215,7 @@ export const gateway = {
     clearReconnectTimer();
     _members = new Map();
     _channels = new Map();
+    _messages = new Map();
     _status = "closed";
     const ws = socket;
     socket = null;
@@ -209,5 +225,27 @@ export const gateway = {
   /** App calls this after routing to login so a fresh login + reconnect starts clean. */
   clearAuthFailed(): void {
     _authFailed = false;
+  },
+
+  /** A channel's cached messages, sorted ascending by id (oldest→newest) for display. */
+  messagesFor(channelId: number): PublicMessage[] {
+    return [...(_messages.get(channelId)?.values() ?? [])].sort((a, b) => a.id - b.id);
+  },
+
+  /** Ingest a page of history (or load-older results), upserting each by id (dedupes
+   * against any live message.create already cached) in a single outer-map reassign. */
+  prependHistory(channelId: number, msgs: PublicMessage[]): void {
+    if (msgs.length === 0) return;
+    const inner = _messages.get(channelId) ?? new Map<number, PublicMessage>();
+    for (const msg of msgs) inner.set(msg.id, msg);
+    _messages.set(channelId, inner);
+    _messages = new Map(_messages);
+  },
+
+  /** Send a message over the WS for a channel. Fire-and-forget — the server broadcasts
+   * message.create back to the sender, so no optimistic insert is needed. */
+  sendMessage(channelId: number, content: string): void {
+    if (socket === null || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify({ op: "message.send", d: { channelId, content } }));
   },
 };

@@ -4,6 +4,7 @@
   import { channelStore } from "./channelStore.svelte";
   import { createChannel, type ChannelErrorCode } from "./channels";
   import { gateway } from "./gateway.svelte";
+  import MessagePane from "./MessagePane.svelte";
 
   let { onLogout, onSessionInvalid } = $props<{
     onLogout: () => void;
@@ -124,6 +125,10 @@
     </form>
   </section>
 
+  <section class="card pane-card">
+    <MessagePane />
+  </section>
+
   <section class="card">
     <h2>Members</h2>
     <ul class="members">
@@ -215,6 +220,11 @@
   }
   .channel.active .hash {
     color: var(--text);
+  }
+  .pane-card {
+    display: flex;
+    flex-direction: column;
+    min-height: 16rem;
   }
   .create .row {
     gap: 0.5rem;
