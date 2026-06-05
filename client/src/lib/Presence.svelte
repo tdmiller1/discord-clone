@@ -5,6 +5,7 @@
   import { createChannel, type ChannelErrorCode } from "./channels";
   import { gateway } from "./gateway.svelte";
   import MessagePane from "./MessagePane.svelte";
+  import VoicePanel from "./VoicePanel.svelte";
 
   let { onLogout, onSessionInvalid } = $props<{
     onLogout: () => void;
@@ -125,6 +126,10 @@
     </form>
   </section>
 
+  <section class="card">
+    <VoicePanel />
+  </section>
+
   <section class="card pane-card">
     <MessagePane />
   </section>
@@ -139,6 +144,9 @@
           <span class="name" class:offline-name={m.status === "offline"}>
             {m.username}{m.id === selfId ? " (you)" : ""}
           </span>
+          {#if m.voiceChannelId !== null}
+            <span class="voice-marker" title="In voice">🔊</span>
+          {/if}
         </li>
       {/each}
     </ul>
@@ -189,6 +197,10 @@
   }
   .offline-name {
     color: var(--muted);
+  }
+  .voice-marker {
+    font-size: 0.8rem;
+    color: var(--ok);
   }
   .channels {
     list-style: none;
