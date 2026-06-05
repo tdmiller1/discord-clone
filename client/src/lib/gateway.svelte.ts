@@ -51,6 +51,12 @@ let intentional = false;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let backoffMs = BACKOFF_BASE_MS;
 
+// Voice seam (M4): the voice engine rides this same socket. It registers an inbound `voice.*`
+// frame route + a teardown signal here so we never open a second WS and the dependency stays
+// one-directional (voice → gateway).
+let voiceFrameHandler: ((frame: ServerFrame) => void) | null = null;
+let voiceTeardownHandler: (() => void) | null = null;
+
 /** Derive the ws(s):// gateway URL from the stored http(s) server base. */
 function wsUrl(): string {
   const u = new URL(store.serverUrl);
@@ -93,7 +99,11 @@ function handleFrame(frame: ServerFrame): void {
     case "presence.update": {
       const existing = _members.get(frame.d.userId);
       if (!existing) break; // unknown userId — ignore safely
-      _members.set(frame.d.userId, { ...existing, status: frame.d.status });
+      _members.set(frame.d.userId, {
+        ...existing,
+        status: frame.d.status,
+        voiceChannelId: frame.d.voiceChannelId, // thread voice membership for the "who's in voice" set
+      });
       // Svelte 5 Maps aren't deeply reactive — reassign to recompute the derived list.
       _members = new Map(_members);
       break;
@@ -110,7 +120,10 @@ function handleFrame(frame: ServerFrame): void {
       break;
     }
     default:
-      break; // unknown op — ignore
+      // Route voice.* frames to the voice engine if it has registered (single /ws socket);
+      // any other unknown op is ignored.
+      if (frame.op.startsWith("voice.")) voiceFrameHandler?.(frame);
+      break;
   }
 }
 
@@ -169,6 +182,7 @@ function open(): void {
     if (event.code === AUTH_FAILURE_CODE) {
       // Session is dead (invalid/expired/revoked/disabled). Do NOT reconnect with the
       // same dead token; App clears the session + returns to login on this flag.
+      voiceTeardownHandler?.(); // release mic + transports — the socket is gone
       _authFailed = true;
       _status = "closed";
       return;
@@ -212,6 +226,7 @@ export const gateway = {
   /** Intentional teardown (logout / unmount): stop reconnecting and close cleanly. */
   disconnect(): void {
     intentional = true;
+    voiceTeardownHandler?.(); // release mic + transports from the one socket-teardown point
     clearReconnectTimer();
     _members = new Map();
     _channels = new Map();
@@ -254,5 +269,25 @@ export const gateway = {
     };
     if (Number.isInteger(attachmentId) && attachmentId! > 0) d.attachmentId = attachmentId;
     socket.send(JSON.stringify({ op: "message.send", d }));
+  },
+
+  /** Send a voice.* op over the existing gateway socket (the voice engine's only send path —
+   * no second WebSocket). Guards readyState; returns whether the frame was actually sent so the
+   * engine can fail a join if the socket dropped. Mirrors sendMessage's guard. */
+  sendVoice(op: string, d: unknown): boolean {
+    if (socket === null || socket.readyState !== WebSocket.OPEN) return false;
+    socket.send(JSON.stringify({ op, d }));
+    return true;
+  },
+
+  /** Register the voice engine's inbound voice.* frame route (called once at its module load). */
+  onVoiceFrame(handler: (frame: ServerFrame) => void): void {
+    voiceFrameHandler = handler;
+  },
+
+  /** Register a teardown the gateway fires on disconnect() + 4001 so a dropped/auth-failed
+   * socket releases the mic + transports from one place. */
+  onVoiceTeardown(handler: () => void): void {
+    voiceTeardownHandler = handler;
   },
 };
