@@ -1,0 +1,16 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| On boot, exactly one type:"voice" channel seeded idempotently; seeding in a clear place reusing channels.ts helpers | PASS | `seedVoiceChannel(db)` in `server/src/channels.ts:89-102` (transaction-wrapped check-then-insert via `getVoiceChannel`/`createChannel`/`nextChannelPosition`), called from `buildApp` at `server/src/app.ts:60`. Smoke test (two boots on same db) yielded one voice row, same id 1. |
+| Seeded voice channel returned in ready.channels with type:"voice", no gateway change | PASS | `gateway.ts:97` `listChannels(db).map(toPublicChannel)`; `toPublicChannel` (`types.ts:96-105`) copies `type` verbatim. No gateway/types edits. |
+| M2 invariants preserved: POST /api/channels rejects type:"voice"; duplicate-name rules unchanged | PASS | `routes/channels.ts:23` still `enum: ["text"]`; route untouched. |
+| getChannelById / lookups distinguish text vs voice for later voice.join validation | PASS | `getChannelById` returns full ChannelRow with `type` (`channels.ts:43-47`); new `getVoiceChannel(db)` typed resolver (`channels.ts:74-78`). |
+| npm run typecheck passes; voice channel present once after restarts | PASS | typecheck: 0 errors (1 pre-existing unrelated MessagePane warning). Two-boot smoke test: voice count = 1, name "Voice", created_by null. |
+| contracts/voice-channel.md records identity, single-room invariant, ready.channels shape, exactly-one guarantee for stories 003 & 005 | PASS | `contracts/voice-channel.md` present and complete. |
+
+Suggested commit message:
+feat(server): seed and expose single v1 voice channel on boot
