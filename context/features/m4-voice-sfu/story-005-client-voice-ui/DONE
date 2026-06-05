@@ -1,0 +1,20 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+| # | Criterion | Result | Evidence |
+|---|---|---|---|
+| 1 | Voice channel rendered in channel list, visually distinct, not selectable as a message pane (extends the text-only filter) | PASS | gateway.svelte.ts:48-53 adds parallel `_voiceChannelList` (voice-only); :218 `voiceChannels` getter; `_channelList`/`channels` stay text-only (:42-46). VoicePanel.svelte:8,23-30 renders `gateway.voiceChannels[0]` with a 🔊 glyph + Join/Leave control, never `channelStore.select`. Presence.svelte:129-131 hosts it as a parallel `.card`. |
+| 2 | Join calls `voice.join()`; becomes Leave (`voice.leave()`) in voice; surfaces clear error on mic-deny/connect-fail | PASS | VoicePanel.svelte:47 `voice.join(channel.id)` (disabled + "Joining…" while joining, :47-49); :34 `voice.leave()` when `inVoice` (:9,33); error line :70-72 `{#if voice.error}`. |
+| 3 | In-voice participant list, updating live | PASS/UNTESTABLE | VoicePanel.svelte:53-68 roster from `voice.participants` (reactive `$derived`) + local user. Live two-client update is runtime — manual: join from two clients, confirm each appears in the other's roster. |
+| 4 | Mute toggle reflects + drives engine `muted`; own muted state visible (+ optional deafen) | PASS | VoicePanel.svelte:35-37 Mute toggle (`class:active={voice.muted}`, `voice.toggleMute()`); :38-45 Deafen (`voice.deafened`/`voice.toggleDeafen()`); self muted marker :58. |
+| 5 | Member-list voice indicator driven by `voiceChannelId` | PASS | Presence.svelte:147-149 marker when `m.voiceChannelId !== null`; gateway threads it via presence.update (gateway.svelte.ts:112). |
+| 6 | Text-channel switching + message pane unaffected (voice parallel) | PASS | `channels`/`_channelList`, default-select `$effect` (Presence.svelte:24-28), channel `{#each}` (:102-113), `MessagePane`, `channelStore` all untouched/text-only. |
+| 7 | `npm run typecheck` passes; two clients show voice channel + each other in-voice with mute reflected | PASS/UNTESTABLE | typecheck: 0 errors, 1 pre-existing unrelated M3 MessagePane warning (no new warnings). Two-client behavior is runtime — code path present and correct. |
+
+Quality: Svelte 5 runes throughout; CSS-var palette reused (no inline-style hacks); consumes voice-store API exactly per contracts/voice-store.md; voice.svelte.ts NOT modified; voice channel stays parallel to text selection; per-member indicator from members[].voiceChannelId; client imports without .js; no new comments on untouched code; no files >1000 lines; no TODO/console.log. Commit c10050f contains only the three client UI files + story marker.
+
+Note: docker-compose.yml working-tree drift at validation time is the user's separate Cloudflare Tunnel infra work, explicitly out of scope for this story.
+
+Suggested commit message:
+feat(client): voice channel UI — join/leave, mute/deafen, in-voice presence
