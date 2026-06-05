@@ -43,9 +43,24 @@ export interface ReadyPayload {
   members: Member[];
 }
 
+/** A persisted message as it appears in history (story 003) and `message.create` (story 002). */
+export interface PublicMessage {
+  id: number;
+  channelId: number;
+  authorId: number;
+  content: string;
+  attachmentId: number | null; // always null in M2 (images arrive M3)
+  createdAt: number; // epoch ms
+}
+
 /** server→client: op `channel.create` (broadcast on POST /api/channels, story 002/003). */
 export interface ChannelCreatePayload {
   channel: PublicChannel;
+}
+
+/** server→client: op `message.create` (broadcast to all authed sockets, story 002). */
+export interface MessageCreatePayload {
+  message: PublicMessage;
 }
 
 /** server→client: op `presence.update`. */
@@ -65,4 +80,5 @@ export interface Envelope<Op extends string = string, D = unknown> {
 export type ServerFrame =
   | Envelope<"ready", ReadyPayload>
   | Envelope<"presence.update", PresenceUpdatePayload>
-  | Envelope<"channel.create", ChannelCreatePayload>;
+  | Envelope<"channel.create", ChannelCreatePayload>
+  | Envelope<"message.create", MessageCreatePayload>;
