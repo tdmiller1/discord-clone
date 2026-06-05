@@ -1,0 +1,29 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| `mediasoup` in package.json; `VoiceSfu` inits Worker + Opus Router using `config.rtcMinPort`/`rtcMaxPort`, no scattered `process.env` | PASS | `server/package.json:28` (`mediasoup ^3.20.3`); `sfu.ts:88-102` creates worker with `rtcMinPort/rtcMaxPort` + Opus-only router; constructor reads only `config.*` (`sfu.ts:77-81`). Runtime smoke test confirmed worker+router start. |
+| Per-channel room tracks participants; each owns send+recv transports, one producer, consumers map; minimal gateway API (rtpCaps, create/connect transport, produce, consume, pause/resume, listProducers, closeParticipant) | PASS | `Participant`/`VoiceRoom` types `sfu.ts:46-59`; full API `sfu.ts:104-302` matches contract. |
+| `WebRtcTransport` uses `config.publicHost` as `announcedIp`; DTLS-SRTP default | PASS | `sfu.ts:122` `listenIps: [{ ip: "0.0.0.0", announcedIp: this.#announcedIp }]`; DTLS-SRTP is mediasoup default. Runtime smoke test created a transport successfully. |
+| Framework-agnostic (no Fastify import), mirrors BroadcastHub/PresenceRegistry, constructed once & shared in buildApp | PASS | No fastify import in `sfu.ts` (only a comment mention); `#private` fields plain class; `app.ts:75-79` constructs once + onClose. |
+| Leak-free cleanup: closeParticipant closes transports/producer/consumers; empty room released; worker/router closed on onClose | PASS | `closeParticipant` `sfu.ts:268-283` (cascading close + `roomEmpty` signal); `close()` `sfu.ts:290-302`; `app.ts:77-79` onClose hook. |
+| `npm run typecheck` passes; worker starts without binding errors; Docker runs prebuilt worker | PASS | typecheck 0 errors (only pre-existing M3 MessagePane warning). Worker start verified via runtime smoke test. Docker base stays glibc `node:24-bookworm-slim` with python3/make/g++ toolchain + annotations (`Dockerfile:8-12,25-27`). Full container build is UNTESTABLE here but Dockerfile is correctly annotated. |
+| `contracts/sfu-core.md` documents public method signatures + returned data shapes | PASS | `contracts/sfu-core.md` documents lifecycle, identifiers, returned shapes (TransportParams/ConsumeParams/RtpCapabilities), full method signatures, and gateway conventions. |
+
+Quality checks: ESM `.js` import extensions correct; framework-agnostic (no Fastify); constructed once with onClose teardown; config via loadConfig only; no TODO/placeholder; sfu.ts 343 lines (<1000); buildApp async ripple handled (index.ts awaits; no other callers).
+
+Documentation audit: No doc changes required — config keys (publicHost/rtcMinPort/rtcMaxPort) already exist in config.ts, .env.example, and docker-compose.yml maps the UDP range. SPEC.md already specifies §11.
+
+Suggested commit message:
+feat(voice): add mediasoup SFU core service (worker, router, voice rooms)
+
+Add framework-agnostic VoiceSfu service owning one mediasoup worker + Opus
+router and a per-channel room registry with the per-participant API the
+gateway (story 003) will relay to clients. Make buildApp async to await
+worker init; dispose on onClose. Annotate Dockerfile for the glibc prebuilt
+worker. Document the contract in contracts/sfu-core.md.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
