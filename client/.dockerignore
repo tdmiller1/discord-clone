@@ -1,0 +1,6 @@
+# Keep the web image build context small and deterministic.
+node_modules
+dist
+src-tauri
+.svelte-kit
+*.log

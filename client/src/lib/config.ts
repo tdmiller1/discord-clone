@@ -1,5 +1,10 @@
-/** Default server URL shown on first launch. The admin overrides this per deployment. */
-export const DEFAULT_SERVER_URL = "http://localhost:8080";
+/**
+ * Default server URL shown on first launch. The admin overrides this per deployment.
+ * Baked in at build time via VITE_SERVER_URL (set for the hosted web image so it
+ * targets the public API); Tauri and `npm run dev` builds leave it unset and fall
+ * back to localhost. Users can still change it on the login/register screen.
+ */
+export const DEFAULT_SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:8080";
 
 const SERVER_URL_KEY = "dc:serverUrl";
 

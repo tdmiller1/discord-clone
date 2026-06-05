@@ -10,7 +10,16 @@ services:
       NODE_ENV: production
       HTTP_PORT: "8080"
       DATA_DIR: /data
-      PUBLIC_HOST: localhost
+      # Public IP the SFU advertises to clients for WebRTC media (mediasoup
+      # announcedIp). Must be a routable IPv4, set in the root .env. Falls back to
+      # localhost for local-only dev. NOT reachable via the Cloudflare tunnel —
+      # the UDP RTC range below must be port-forwarded directly on the router.
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+      # Extra ICE candidate IPs (comma-separated), e.g. the host's LAN IP so clients
+      # on the same network reach the SFU directly instead of hairpinning the public
+      # IP. Set in the root .env. Each extra IP consumes an additional UDP port per
+      # transport from the RTC range below.
+      RTC_EXTRA_ANNOUNCED_IPS: ${RTC_EXTRA_ANNOUNCED_IPS:-}
       RTC_MIN_PORT: "40000"
       RTC_MAX_PORT: "40010"
       MAX_UPLOAD_MB: "10"
@@ -18,15 +27,31 @@ services:
       - discord-data:/data
     restart: unless-stopped
 
+  # Hosted web client (nginx serving the Vite build of the Svelte app). A third
+  # deployable alongside the Tauri desktop app — same webview code, full voice via
+  # mediasoup-client. VITE_SERVER_URL bakes the public API URL into the bundle so
+  # the hosted client targets it by default (users can still override on login).
+  # Reached by the tunnel via http://localhost:8083 (cloudflared is on host net).
+  web:
+    build:
+      context: ./client
+      dockerfile: Dockerfile.web
+      args:
+        VITE_SERVER_URL: ${VITE_SERVER_URL:-}
+    image: discord-clone-web:dev
+    ports:
+      - "8083:80"
+    restart: unless-stopped
+
   # Cloudflare Tunnel connector. Exposes the server publicly without opening any
-  # inbound ports. The tunnel is remotely-managed: its public-hostname -> service
-  # mapping lives in the Cloudflare dashboard and must point at http://server:8080
-  # (the Compose service name + HTTP_PORT) — NOT localhost, since this container
-  # can't see the host's localhost. Token is read from the root .env (gitignored).
+  # inbound ports. Runs on host networking so the dashboard's origin service of
+  # http://localhost:8080 resolves to the host's published server port. Token is
+  # read from the root .env (gitignored).
   # NOTE: only HTTP/WS traverse the tunnel; WebRTC voice (UDP 40000-40010) does not.
   cloudflared:
     image: cloudflare/cloudflared:latest
     command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    network_mode: host
     restart: unless-stopped
     depends_on:
       - server

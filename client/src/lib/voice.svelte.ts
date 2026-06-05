@@ -41,6 +41,13 @@ let _participants = $state<VoiceParticipant[]>([]);
 let _muted = $state(false);
 let _deafened = $state(false);
 let _error = $state<string | null>(null);
+// Live audio levels (0..1) for visual proof the pipeline carries sound. _localLevel is the
+// mic input (proves capture); _levels maps participantId → inbound level (proves a peer's
+// audio is arriving). _audioBlocked flags when the browser refused to autoplay remote audio
+// (iOS Safari) so the UI can offer a one-tap unblock.
+let _localLevel = $state(0);
+let _levels = $state<Record<string, number>>({});
+let _audioBlocked = $state(false);
 
 // ── Non-reactive module locals (SDK objects, streams, audio, resolvers) ──────────────────────
 let device: Device | null = null;
@@ -53,6 +60,13 @@ let participantId: string | null = null;
 const consumers = new Map<string, Consumer>(); // producerId → Consumer
 const audioEls = new Map<string, HTMLAudioElement>(); // producerId → playback element
 const producersByParticipant = new Map<string, string[]>(); // participantId → producerIds
+
+// WebAudio metering (non-reactive): one shared context, an analyser on the mic, and one per
+// remote producer. Analysers are pure sinks (never connected to destination) so they add no echo.
+let audioCtx: AudioContext | null = null;
+let micAnalyser: AnalyserNode | null = null;
+const remoteAnalysers = new Map<string, AnalyserNode>(); // producerId → analyser
+let levelRaf: number | null = null;
 
 // Pending request/reply resolvers for ops with no transport-event callback.
 let pendingJoined: ((p: VoiceJoinedPayload) => void) | null = null;
@@ -153,6 +167,102 @@ function consumeProducer(peerId: string, producerId: string): void {
   });
 }
 
+/** Lazily create the shared AudioContext (handles the webkit-prefixed iOS Safari name). */
+function ensureAudioCtx(): AudioContext | null {
+  if (audioCtx === null) {
+    const Ctor =
+      window.AudioContext ??
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (Ctor === undefined) return null;
+    audioCtx = new Ctor();
+  }
+  return audioCtx;
+}
+
+/** RMS amplitude of an analyser's current frame, scaled to a visible-for-speech 0..1. */
+function levelOf(analyser: AnalyserNode, buf: Uint8Array<ArrayBuffer>): number {
+  analyser.getByteTimeDomainData(buf);
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) {
+    const v = (buf[i] - 128) / 128;
+    sum += v * v;
+  }
+  return Math.min(1, Math.sqrt(sum / buf.length) * 3);
+}
+
+/** Reverse-lookup the participant that owns a producer id. */
+function participantOf(producerId: string): string | null {
+  for (const [pid, ids] of producersByParticipant) {
+    if (ids.includes(producerId)) return pid;
+  }
+  return null;
+}
+
+/** Attach an analyser to a MediaStream for level metering. Best-effort; never throws out. */
+function meter(producerId: string | null, stream: MediaStream): void {
+  const ctx = ensureAudioCtx();
+  if (ctx === null) return;
+  try {
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 2048;
+    ctx.createMediaStreamSource(stream).connect(analyser);
+    if (producerId === null) micAnalyser = analyser;
+    else remoteAnalysers.set(producerId, analyser);
+  } catch {
+    /* metering is a diagnostic nicety; ignore unsupported-source errors */
+  }
+}
+
+/** Drive _localLevel + _levels from the analysers on each animation frame. Idempotent. */
+function startLevelLoop(): void {
+  if (levelRaf !== null) return;
+  const buf = new Uint8Array(new ArrayBuffer(2048));
+  const tick = (): void => {
+    if (micAnalyser !== null) _localLevel = levelOf(micAnalyser, buf);
+    if (remoteAnalysers.size > 0) {
+      const next: Record<string, number> = {};
+      for (const [producerId, analyser] of remoteAnalysers) {
+        const pid = participantOf(producerId);
+        if (pid === null) continue;
+        next[pid] = Math.max(next[pid] ?? 0, levelOf(analyser, buf));
+      }
+      _levels = next;
+    }
+    levelRaf = requestAnimationFrame(tick);
+  };
+  levelRaf = requestAnimationFrame(tick);
+}
+
+/** Tear down all metering: stop the loop, drop analysers, close the context, zero the levels. */
+function stopMetering(): void {
+  if (levelRaf !== null) {
+    cancelAnimationFrame(levelRaf);
+    levelRaf = null;
+  }
+  micAnalyser?.disconnect();
+  micAnalyser = null;
+  for (const analyser of remoteAnalysers.values()) analyser.disconnect();
+  remoteAnalysers.clear();
+  if (audioCtx !== null) {
+    void audioCtx.close().catch(() => {});
+    audioCtx = null;
+  }
+  _localLevel = 0;
+  _levels = {};
+  _audioBlocked = false;
+}
+
+/** Resume the audio context + (re)play every remote element from a user gesture (iOS unblock). */
+async function enableAudio(): Promise<void> {
+  try {
+    await ensureAudioCtx()?.resume();
+  } catch {
+    /* ignore */
+  }
+  await Promise.allSettled([...audioEls.values()].map((a) => a.play()));
+  _audioBlocked = false;
+}
+
 /** Finish a consume once voice.consumer arrives: build the Consumer + a playback <audio>. */
 async function onConsumer(d: VoiceConsumerPayload): Promise<void> {
   if (recvTransport === null) return;
@@ -178,10 +288,18 @@ async function onConsumer(d: VoiceConsumerPayload): Promise<void> {
     audio.srcObject = stream;
     audio.autoplay = true;
     audio.muted = _deafened;
+    // iOS Safari refuses to play a *detached* media element, and wants playsinline. Attach it
+    // to the DOM (hidden) so playback can actually start.
+    audio.setAttribute("playsinline", "");
+    audio.style.display = "none";
+    document.body.appendChild(audio);
     void audio.play().catch(() => {
-      /* autoplay may be deferred until a user gesture — track stays live */
+      // Autoplay blocked (typically iOS Safari before a gesture). Surface it so the UI can
+      // offer a one-tap unblock; the track stays live and metering still works meanwhile.
+      _audioBlocked = true;
     });
     audioEls.set(d.producerId, audio);
+    meter(d.producerId, stream);
 
     if (peerId !== null) {
       upsertParticipant(peerId);
@@ -204,8 +322,11 @@ function dropParticipant(peerId: string): void {
     if (audio) {
       audio.pause();
       audio.srcObject = null;
+      audio.remove();
       audioEls.delete(producerId);
     }
+    remoteAnalysers.get(producerId)?.disconnect();
+    remoteAnalysers.delete(producerId);
   }
   producersByParticipant.delete(peerId);
   removeParticipant(peerId);
@@ -288,6 +409,9 @@ async function join(channelId: number): Promise<void> {
 
   _error = null;
   _status = "joining";
+  // Create + resume the AudioContext synchronously inside the click gesture so iOS Safari
+  // unlocks audio for the remote elements we'll create later.
+  void ensureAudioCtx()?.resume();
 
   // 1. Mic capture — a rejection (denied / no device) aborts the join cleanly.
   try {
@@ -346,6 +470,10 @@ async function join(channelId: number): Promise<void> {
       producer = await sendTransport.produce({ track });
     }
 
+    // Mic level meter (proof of capture) + start the per-frame level loop.
+    if (micStream !== null) meter(null, micStream);
+    startLevelLoop();
+
     // 7. Consume every producer already in the room.
     for (const { participantId: peerId, producerId } of joined.producers) {
       consumeProducer(peerId, producerId);
@@ -400,9 +528,11 @@ function teardown(notify: boolean): void {
   for (const audio of audioEls.values()) {
     audio.pause();
     audio.srcObject = null;
+    audio.remove();
   }
   audioEls.clear();
   producersByParticipant.clear();
+  stopMetering();
 
   sendTransport?.close();
   sendTransport = null;
@@ -455,6 +585,22 @@ export const voice = {
   /** mic-denied / transport-failed / voice.error message, or null. */
   get error(): string | null {
     return _error;
+  },
+  /** Local mic input level, 0..1 (proof the mic is capturing, independent of mute). */
+  get localLevel(): number {
+    return _localLevel;
+  },
+  /** Inbound audio level, 0..1, for a participant (proof their audio is arriving). */
+  levelFor(participantId: string): number {
+    return _levels[participantId] ?? 0;
+  },
+  /** True when the browser blocked remote audio autoplay (offer enableAudio from a gesture). */
+  get audioBlocked(): boolean {
+    return _audioBlocked;
+  },
+  /** Resume playback of all remote audio from a user gesture (iOS Safari unblock). */
+  enableAudio(): Promise<void> {
+    return enableAudio();
   },
 
   /** Capture the mic + negotiate the SFU session. Sets `error` on failure (never throws). */

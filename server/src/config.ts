@@ -11,6 +11,12 @@ export interface Config {
   dataDir: string;
   /** Public hostname/IP advertised to clients (used as the WebRTC ICE announce address in M4). */
   publicHost: string;
+  /**
+   * Every IP the SFU advertises as an ICE candidate: the public host plus any extra
+   * announced IPs from RTC_EXTRA_ANNOUNCED_IPS (e.g. the server's LAN IP, so clients
+   * on the same network connect directly instead of hairpinning the public IP).
+   */
+  rtcAnnouncedIps: string[];
   /** UDP media port range for the SFU (M4). */
   rtcMinPort: number;
   rtcMaxPort: number;
@@ -40,6 +46,16 @@ function num(name: string, fallback: number): number {
   return parsed;
 }
 
+/** Parses a comma-separated env var into a trimmed, de-duplicated, non-empty list. */
+function csv(name: string): string[] {
+  const raw = process.env[name];
+  if (raw === undefined) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
 /**
  * Image MIME types accepted by the upload route (SPEC.md §10). Determined by
  * byte-sniffing the upload, never the client-supplied Content-Type/filename.
@@ -59,11 +75,13 @@ export function imagesDir(config: Config): string {
 }
 
 export function loadConfig(): Config {
+  const publicHost = process.env.PUBLIC_HOST ?? "localhost";
   return {
     nodeEnv: process.env.NODE_ENV ?? "development",
     httpPort: num("HTTP_PORT", 8080),
     dataDir: process.env.DATA_DIR ?? "./data",
-    publicHost: process.env.PUBLIC_HOST ?? "localhost",
+    publicHost,
+    rtcAnnouncedIps: [...new Set([publicHost, ...csv("RTC_EXTRA_ANNOUNCED_IPS")])],
     rtcMinPort: num("RTC_MIN_PORT", 40000),
     rtcMaxPort: num("RTC_MAX_PORT", 40100),
     maxUploadMb: num("MAX_UPLOAD_MB", 10),
