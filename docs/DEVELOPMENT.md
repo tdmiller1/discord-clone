@@ -9,6 +9,10 @@ scripts/  engineering-manager pipeline helpers.
 SPEC.md   What we're building and the milestone roadmap (M0–M5).
 ```
 
+This doc covers building and running from source. To **deploy the published image**, see the
+deploy runbook in the [root `README.md`](../README.md) and the operations reference in
+[`docs/DEPLOYMENT.md`](DEPLOYMENT.md).
+
 ## Prerequisites
 
 - **Node** ≥ 20 (24 recommended) — server and client frontend.
@@ -64,5 +68,9 @@ npm run tauri build  # produces installers under src-tauri/target/release/bundle
 
 `.github/workflows/ci.yml`:
 - **server** — build, `/health` smoke test, Docker image build.
-- **client** — `tauri build` on `ubuntu-latest` + `windows-latest`, uploading the
-  AppImage/deb/msi/exe installers as artifacts.
+- **client** — `tauri build` on `ubuntu-latest` + `windows-latest` builds the
+  AppImage/deb/msi/exe installers as the per-change gate.
+
+On a `v*` tag push the release jobs additionally publish the server image to GHCR and attach the
+four client installers to a **GitHub Release** (the distributable surface — see the deploy
+runbook in the [root `README.md`](../README.md)).
