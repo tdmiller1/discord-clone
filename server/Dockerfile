@@ -6,8 +6,12 @@ WORKDIR /app
 # better-sqlite3 has no prebuilt binary for this Node ABI, so node-gyp must
 # compile it from source — which needs Python + a C/C++ toolchain. These live
 # only in the build stage; the runtime image below copies the compiled output.
+# This same python3 + make + g++ toolchain also covers mediasoup's worker build
+# (SPEC.md §11). mediasoup only ships a *-kernel6 glibc prebuilt; when no prebuilt
+# matches the host it compiles the worker locally via meson/ninja, which it installs
+# with pip — so python3-pip is required here for that fallback path.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 make g++ \
+      python3 python3-pip make g++ \
     && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
 RUN npm ci
@@ -18,6 +22,9 @@ RUN npm run build
 RUN npm prune --omit=dev
 
 # --- runtime stage: prod deps + compiled output only, no toolchain ---
+# Must stay on the Debian (glibc) base, NOT alpine/musl: mediasoup's worker is a
+# glibc-linked native binary (prebuilt or compiled in the build stage above) and
+# will not run under musl.
 FROM node:24-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \

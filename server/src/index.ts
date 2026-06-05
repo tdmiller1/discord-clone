@@ -2,7 +2,7 @@ import { loadConfig } from "./config.js";
 import { buildApp } from "./app.js";
 
 const config = loadConfig();
-const app = buildApp(config);
+const app = await buildApp(config);
 
 try {
   const address = await app.listen({ host: "0.0.0.0", port: config.httpPort });
