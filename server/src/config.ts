@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 /**
  * Runtime configuration, loaded from environment variables.
  * See SPEC.md §12 for the canonical list and deployment notes.
@@ -36,6 +38,24 @@ function num(name: string, fallback: number): number {
     throw new Error(`Invalid numeric value for ${name}: ${JSON.stringify(raw)}`);
   }
   return parsed;
+}
+
+/**
+ * Image MIME types accepted by the upload route (SPEC.md §10). Determined by
+ * byte-sniffing the upload, never the client-supplied Content-Type/filename.
+ */
+export const ALLOWED_IMAGE_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+] as const;
+
+export type AllowedImageType = (typeof ALLOWED_IMAGE_TYPES)[number];
+
+/** Resolves the on-disk directory for uploaded images: `<dataDir>/images`. */
+export function imagesDir(config: Config): string {
+  return join(config.dataDir, "images");
 }
 
 export function loadConfig(): Config {
