@@ -1,0 +1,30 @@
+Validated: 2026-06-04
+Branch: feat/public-deploy-tunnel-web-voice
+
+Acceptance Criteria:
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| Release workflow triggers on `v*` tag push and builds & pushes the server OCI image to GHCR at `ghcr.io/<owner>/discord-clone-server` | PASS | `.github/workflows/ci.yml:114-136` — `release-server-image` job, `if: startsWith(github.ref, 'refs/tags/v')`; workflow `on.push.tags: ['v*']` (line 6, from story 001). Pushes `ghcr.io/tdmiller1/discord-clone-server` (lines 123, 133-136). |
+| Image tagged with both the release `<version>` and `latest`, reusing the existing multi-stage `server/Dockerfile` (no second Dockerfile) | PASS | `ci.yml:130-136` — `docker build -t "$IMAGE:$VERSION" -t "$IMAGE:latest" .` with `working-directory: server`, then pushes both tags. No new Dockerfile created (commit bd6411c touches only ci.yml + contract). |
+| Job authenticates with the workflow `GITHUB_TOKEN` and declares `permissions: packages: write`; login→build→push works with no manual creds | PASS | `ci.yml:119-121` job-level `permissions: { contents: read, packages: write }`; `ci.yml:128-129` `echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin`. No manual registry secret. |
+| Image preserves glibc/amd64 (mediasoup worker + better-sqlite3); build targets linux/amd64 (no multi-arch) | PASS | Default-platform `docker build` on amd64 `ubuntu-latest`; `server/Dockerfile` is bookworm (glibc), no `--platform`/buildx. Documented in contract arch section. |
+| Idempotent / re-runnable: re-running for an existing tag overwrites the version tag predictably and does not fail | PASS (wiring) / UNTESTABLE (live) | Plain `docker push` (overwrite-by-tag, no create-only semantics), `ci.yml:133-136`; documented in contract Idempotency section. Live re-push behavior requires a real GHCR publish. |
+| Existing per-change CI (server build + `/health` smoke + `docker build`, client `tauri build`) unchanged and still runs on push/PR — release path additive | PASS | Story-002 implement commit (bd6411c) diff is purely additive: +24 lines appending the new job; no edits to `on:` or the `release-version-guard`/`server`/`client` jobs. |
+| `contracts/server-image.md` records full registry path, `<version>`+`latest` tag scheme, supported arch (amd64/glibc), and package-visibility notes for stories 004/005 | PASS | `contracts/server-image.md` — image reference (lines 19-36), tags published (38-51), arch (52-66), pull/run (68-93), package visibility private-default + make-public/private-pull paths (95-111), idempotency (113-118), build provenance (120-128). |
+| Acceptance verification: a pushed test `v*` tag produces a pullable image; `docker pull …:<version>` then `docker run` serves `/health` | UNTESTABLE | Requires a real `v*` tag push + GHCR publish + `docker pull`/`docker run`. Workflow wiring is correct and present; contract documents the exact pull/run/`curl /health` commands (lines 68-77). Manual verification: push `v0.2.0`, confirm job publishes, then `docker pull ghcr.io/tdmiller1/discord-clone-server:0.2.0 && docker run --rm -p 8080:8080 ... && curl -sf http://127.0.0.1:8080/health`. |
+
+Checks:
+- `npm run typecheck` — PASS (0 errors; 1 pre-existing svelte-check warning in MessagePane.svelte, unrelated to this story).
+- `ci.yml` YAML parse — PASS; all four jobs present (release-version-guard, server, client, release-server-image).
+- Quality: new job additive (existing jobs unchanged); safe `${GITHUB_REF_NAME#v}` shell expansion; `--password-stdin` (token kept out of logs); job-scoped `permissions: { contents: read, packages: write }`; image ref matches versioning.md contract; no TODO/placeholder text; no files over 1000 lines.
+
+Suggested commit message:
+ci(release): publish server image to GHCR on v* tags
+
+Add an additive, tag-gated `release-server-image` job to ci.yml that
+builds the existing server/Dockerfile and pushes
+ghcr.io/tdmiller1/discord-clone-server:<version> and :latest using the
+workflow GITHUB_TOKEN (job-scoped packages: write, --password-stdin).
+Document the published image (reference, tags, amd64/glibc arch,
+pull/run, visibility, idempotency) in contracts/server-image.md for
+downstream stories 004/005.
