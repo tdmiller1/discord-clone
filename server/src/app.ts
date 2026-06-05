@@ -4,6 +4,7 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import type { Config } from "./config.js";
 import { openDatabase, type Db } from "./db.js";
+import { seedVoiceChannel } from "./channels.js";
 import authRoutes from "./routes/auth.js";
 import channelRoutes from "./routes/channels.js";
 import wsGateway from "./ws/gateway.js";
@@ -48,6 +49,11 @@ export function buildApp(config: Config): FastifyInstance {
   app.addHook("onClose", async () => {
     db.close();
   });
+
+  // Seed the single v1 voice channel idempotently — SPEC.md §13.3; reseeding on
+  // restart is a no-op. Done before route/gateway registration so the voice row
+  // exists prior to any client connecting or any `ready` snapshot being built.
+  seedVoiceChannel(db);
 
   // Flat all-sockets broadcast hub, constructed at app level (not inside a plugin)
   // so it is visible to both the gateway and the REST layer; `app.broadcast` lets
