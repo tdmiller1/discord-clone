@@ -243,9 +243,16 @@ export const gateway = {
   },
 
   /** Send a message over the WS for a channel. Fire-and-forget — the server broadcasts
-   * message.create back to the sender, so no optimistic insert is needed. */
-  sendMessage(channelId: number, content: string): void {
+   * message.create back to the sender, so no optimistic insert is needed. Pass an optional
+   * positive-integer `attachmentId` to attach an uploaded image (story 003); it is included
+   * in the frame only when valid, so the plain-text path stays the M2 frame. */
+  sendMessage(channelId: number, content: string, attachmentId?: number): void {
     if (socket === null || socket.readyState !== WebSocket.OPEN) return;
-    socket.send(JSON.stringify({ op: "message.send", d: { channelId, content } }));
+    const d: { channelId: number; content: string; attachmentId?: number } = {
+      channelId,
+      content,
+    };
+    if (Number.isInteger(attachmentId) && attachmentId! > 0) d.attachmentId = attachmentId;
+    socket.send(JSON.stringify({ op: "message.send", d }));
   },
 };

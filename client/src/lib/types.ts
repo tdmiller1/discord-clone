@@ -43,13 +43,26 @@ export interface ReadyPayload {
   members: Member[];
 }
 
+/** An uploaded image attachment as embedded in a message (story 002/003). No baked `url` —
+ * the client fetches bytes from GET /api/attachments/:id using `id`. */
+export interface PublicAttachment {
+  id: number;
+  messageId: number | null;
+  filename: string;
+  contentType: string;
+  size: number;
+  width: number | null;
+  height: number | null;
+  createdAt: number; // epoch ms
+}
+
 /** A persisted message as it appears in history (story 003) and `message.create` (story 002). */
 export interface PublicMessage {
   id: number;
   channelId: number;
   authorId: number;
   content: string;
-  attachmentId: number | null; // always null in M2 (images arrive M3)
+  attachment: PublicAttachment | null;
   createdAt: number; // epoch ms
 }
 
