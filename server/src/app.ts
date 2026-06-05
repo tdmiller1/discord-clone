@@ -120,7 +120,7 @@ export async function buildApp(config: Config): Promise<FastifyInstance> {
 
   app.get("/", async () => ({
     name: "discord-clone-server",
-    version: "0.1.0",
+    version: "0.2.0",
     docs: "See SPEC.md",
   }));
 
