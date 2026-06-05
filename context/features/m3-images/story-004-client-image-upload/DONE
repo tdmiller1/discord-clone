@@ -1,0 +1,15 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| Composer gains attach-image control scoped to image/png,image/jpeg,image/gif,image/webp; pending preview + remove affordance | PASS | MessagePane.svelte:246-262 hidden file input with accept attr + attach button; pending preview block MessagePane.svelte:229-237 (thumbnail, filename, Remove button) |
+| On send: multipart POST /api/attachments with session token, then message.send {channelId, content, attachmentId}; image-only allowed; neither blocked client-side | PASS | submitSend MessagePane.svelte:155-185 uploads then sends with returned id; canSend MessagePane.svelte:50-55 requires pendingFile!==null OR draft non-empty (image-only allowed, empty-empty blocked); uploadAttachment attachments.ts:40-67 |
+| Upload UX: "uploading…" indicator, friendly error on rejection without losing typed text, clears pending image only on success | PASS | uploading flag disables input/buttons (MessagePane.svelte:257,268), "Uploading…" hint :238-240, uploadErr surfaced :241-243; on failure draft+pendingFile preserved :181-184; clearPending only on result.ok :177-180 |
+| Client-side guardrails mirror server (allowed type + size pre-check); server remains source of truth | PASS | onPickFile MessagePane.svelte:109-128 checks ALLOWED_IMAGE_TYPES and MAX_UPLOAD_BYTES; constants :19-21 with "server stays authoritative" comment :16-18 |
+| Reuses/extends existing client types (PublicMessage.attachment + PublicAttachment) and gateway/REST + session helpers; no duplicated fetch/auth logic | PASS | types.ts:48-66 PublicAttachment added, PublicMessage.attachment replaces placeholder; attachments.ts mirrors channels/messages/auth idiom (Bearer, discriminated Result, mapError); gateway.svelte.ts:249-256 sendMessage extended with optional positive-integer attachmentId; reads store.serverUrl/sessionToken |
+| npm run typecheck passes; verifiable by running client | PASS (typecheck) / UNTESTABLE (runtime round-trip) | typecheck exits 0 errors (1 acceptable bind:this svelte-check warning). Pick→send→message.create round-trip + server file existence requires running client+server manually |
+
+Suggested commit message:
+feat(client): attach and upload an image in the message composer
