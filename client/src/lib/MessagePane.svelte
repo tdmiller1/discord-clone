@@ -5,6 +5,7 @@
   import { fetchMessages } from "./messages";
   import { uploadAttachment } from "./attachments";
   import type { AttachmentErrorCode } from "./attachments";
+  import InlineImage from "./InlineImage.svelte";
 
   // Mirrors the server default (server/src/config.ts MAX_MESSAGE_LENGTH). Not exposed over
   // any endpoint, so hard-coded here for the composer guard only — the server stays
@@ -214,7 +215,12 @@
           <li class="message">
             <span class="author">{authorName(msg.authorId)}</span>
             <span class="time">{formatTime(msg.createdAt)}</span>
-            <span class="content">{msg.content}</span>
+            {#if msg.content.trim() !== ""}
+              <span class="content">{msg.content}</span>
+            {/if}
+            {#if msg.attachment !== null}
+              <div class="attachment"><InlineImage attachment={msg.attachment} /></div>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -316,6 +322,9 @@
     white-space: pre-wrap;
     word-break: break-word;
     color: var(--text);
+  }
+  .attachment {
+    flex-basis: 100%;
   }
   .load-older {
     width: 100%;
