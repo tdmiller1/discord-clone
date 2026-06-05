@@ -3,12 +3,21 @@
   import { channelStore } from "./channelStore.svelte";
   import { gateway } from "./gateway.svelte";
   import { fetchMessages } from "./messages";
+  import { uploadAttachment } from "./attachments";
+  import type { AttachmentErrorCode } from "./attachments";
 
   // Mirrors the server default (server/src/config.ts MAX_MESSAGE_LENGTH). Not exposed over
   // any endpoint, so hard-coded here for the composer guard only — the server stays
   // authoritative and silently drops over-length message.send frames.
   const MAX_MESSAGE_LENGTH = 4000;
   const PAGE_SIZE = 50;
+
+  // Mirrors the server MAX_UPLOAD_MB / allowed image types. Not exposed over any endpoint,
+  // so hard-coded here as fail-fast UX only — the server re-sniffs bytes and re-checks size
+  // and stays authoritative, rejecting anything that slips past this guard.
+  const MAX_UPLOAD_MB = 10;
+  const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
+  const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
 
   type LoadStatus = "idle" | "loading" | "error";
 
@@ -31,9 +40,16 @@
   let loadingOlder = $state(false);
 
   let draft = $state("");
+  let pendingFile = $state<File | null>(null);
+  let previewUrl = $state<string | null>(null);
+  let uploading = $state(false);
+  let uploadErr = $state("");
+  let fileInput: HTMLInputElement;
+
   const canSend = $derived(
     activeChannel !== null &&
-      draft.trim() !== "" &&
+      !uploading &&
+      (pendingFile !== null || draft.trim() !== "") &&
       draft.trim().length <= MAX_MESSAGE_LENGTH,
   );
 
@@ -89,11 +105,82 @@
     }
   }
 
-  function submitSend(event: Event): void {
+  function onPickFile(event: Event): void {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = ""; // reset so re-picking the same file refires onchange
+    if (!file) return;
+
+    if (!(ALLOWED_IMAGE_TYPES as readonly string[]).includes(file.type)) {
+      uploadErr = "Only PNG, JPEG, GIF, or WebP images.";
+      return;
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      uploadErr = `Image is larger than ${MAX_UPLOAD_MB} MB.`;
+      return;
+    }
+
+    uploadErr = "";
+    if (previewUrl !== null) URL.revokeObjectURL(previewUrl);
+    pendingFile = file;
+    previewUrl = URL.createObjectURL(file);
+  }
+
+  function clearPending(): void {
+    if (previewUrl !== null) URL.revokeObjectURL(previewUrl);
+    pendingFile = null;
+    previewUrl = null;
+    if (fileInput) fileInput.value = "";
+  }
+
+  function uploadErrorMessage(code: AttachmentErrorCode): string {
+    switch (code) {
+      case "unauthorized":
+        return "Your session expired. Please sign in again.";
+      case "file_too_large":
+        return `Image is larger than ${MAX_UPLOAD_MB} MB.`;
+      case "network":
+        return "Could not reach the server.";
+      case "invalid_image":
+      case "no_file":
+      case "not_multipart":
+      case "bad_request":
+      case "unknown":
+      default:
+        return "That image couldn't be uploaded.";
+    }
+  }
+
+  async function submitSend(event: Event): Promise<void> {
     event.preventDefault();
     if (!canSend || activeChannel === null) return;
-    gateway.sendMessage(activeChannel.id, draft.trim());
-    draft = ""; // clear immediately — the authoritative row renders on the broadcast
+    uploadErr = "";
+
+    if (pendingFile === null) {
+      gateway.sendMessage(activeChannel.id, draft.trim());
+      draft = ""; // clear immediately — the authoritative row renders on the broadcast
+      return;
+    }
+
+    // Capture the target channel before awaiting so a slow upload that resolves after a
+    // channel switch still sends to the originally-targeted channel.
+    const channelId = activeChannel.id;
+    uploading = true;
+    const result = await uploadAttachment({
+      serverUrl: store.serverUrl,
+      token: store.sessionToken!,
+      file: pendingFile,
+    });
+    uploading = false;
+
+    if (result.ok) {
+      gateway.sendMessage(channelId, draft.trim(), result.data.id);
+      draft = "";
+      clearPending();
+    } else {
+      // Keep the typed text and the pending image so the user can retry.
+      uploadErr = uploadErrorMessage(result.error);
+    }
   }
 
   function formatTime(ms: number): string {
@@ -133,12 +220,46 @@
       </ul>
     </div>
 
+    {#if pendingFile}
+      <div class="pending">
+        <img class="thumb" src={previewUrl} alt={pendingFile.name} />
+        <span class="filename">{pendingFile.name}</span>
+        <button type="button" class="remove" onclick={clearPending} disabled={uploading}>
+          Remove
+        </button>
+      </div>
+    {/if}
+    {#if uploading}
+      <p class="hint">Uploading…</p>
+    {/if}
+    {#if uploadErr}
+      <p class="err">{uploadErr}</p>
+    {/if}
+
     <form class="composer" onsubmit={submitSend}>
+      <input
+        type="file"
+        accept="image/png,image/jpeg,image/gif,image/webp"
+        bind:this={fileInput}
+        onchange={onPickFile}
+        hidden
+      />
+      <button
+        type="button"
+        class="attach"
+        onclick={() => fileInput.click()}
+        disabled={uploading}
+        aria-label="Attach image"
+        title="Attach image"
+      >
+        +
+      </button>
       <input
         bind:value={draft}
         placeholder={`Message #${activeChannel.name}`}
         aria-label="Message"
         maxlength={MAX_MESSAGE_LENGTH}
+        disabled={uploading}
       />
       <button type="submit" disabled={!canSend}>Send</button>
     </form>
@@ -212,6 +333,41 @@
   }
   .composer input {
     flex: 1;
+  }
+  .composer .attach {
+    flex: 0 0 auto;
+    width: 2rem;
+    font-size: 1.1rem;
+    line-height: 1;
+  }
+  .pending {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+  .thumb {
+    max-height: 3rem;
+    max-width: 3rem;
+    border-radius: 4px;
+    object-fit: cover;
+  }
+  .filename {
+    flex: 1;
+    font-size: 0.85rem;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .remove {
+    flex: 0 0 auto;
+    background: none;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .remove:hover {
+    color: var(--text);
   }
   .err {
     color: var(--err, #f87171);
