@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import websocket, { type WebSocket } from "@fastify/websocket";
 import type { FastifyInstance, FastifyPluginAsync } from "fastify";
 import type { RawData } from "ws";
@@ -6,6 +7,7 @@ import { authenticateSession } from "../auth.js";
 import {
   getChannelById,
   getMessageWithAttachment,
+  getVoiceChannel,
   insertMessage,
   listChannels,
 } from "../channels.js";
@@ -15,16 +17,22 @@ import {
   toPublicMessage,
   toPublicUser,
   type AttachmentRow,
+  type Envelope,
   type Member,
   type ReadyPayload,
   type UserRow,
 } from "../types.js";
+import type { types } from "mediasoup";
+import type { TransportDirection, VoiceSfu } from "../voice/sfu.js";
 import { BroadcastHub } from "./hub.js";
 import { PresenceRegistry } from "./presence.js";
+import { VoiceRegistry } from "./voice-registry.js";
 
 interface WsGatewayOptions {
   config: Config;
   hub: BroadcastHub;
+  sfu: VoiceSfu;
+  voice: VoiceRegistry;
 }
 
 /** Mutable per-connection state held alongside each live socket. */
@@ -37,6 +45,10 @@ interface ConnState {
   authed: boolean;
   /** Timer that closes the socket if a valid `identify` never arrives. */
   deadline: NodeJS.Timeout | null;
+  /** Per-socket SFU participant id, minted on the first `voice.join` (reused on re-join). */
+  participantId: string | null;
+  /** The voice channel this socket is currently in, or `null` if not in voice. */
+  voiceChannelId: number | null;
 }
 
 /** Gateway route path (SPEC.md §7). */
@@ -59,6 +71,14 @@ function toBuffer(data: RawData): Buffer {
   return Buffer.from(data);
 }
 
+/** Extracts a `"send"|"recv"` transport direction from a voice frame's `d`, or `null` if invalid. */
+function parseDirection(d: unknown): TransportDirection | null {
+  if (typeof d !== "object" || d === null) return null;
+  const direction = (d as { direction?: unknown }).direction;
+  if (direction === "send" || direction === "recv") return direction;
+  return null;
+}
+
 /**
  * WebSocket gateway (SPEC.md §7). Authenticates on the first `identify` frame by
  * reusing {@link authenticateSession} (story 003), sends a `ready` snapshot, and
@@ -68,13 +88,14 @@ function toBuffer(data: RawData): Buffer {
  * heartbeat interval handle dead-socket detection and double as the revocation
  * reaper — each tick re-validates every authed socket's session, so CLI-side
  * `revoke-user` (a separate process that only mutates SQLite) is picked up without
- * any IPC. Voice ops (`voice.*`) and `message.*` are out of scope until M4/M2.
+ * any IPC. Voice signaling (`voice.*`) relays the SFU core (story 002) over the
+ * same socket and tracks voice membership via an in-memory {@link VoiceRegistry}.
  */
 const wsGateway: FastifyPluginAsync<WsGatewayOptions> = async (
   app: FastifyInstance,
   opts: WsGatewayOptions,
 ) => {
-  const { config, hub } = opts;
+  const { config, hub, sfu, voice } = opts;
   await app.register(websocket, {
     options: { maxPayload: WS_MAX_FRAME_BYTES },
   });
@@ -92,7 +113,7 @@ const wsGateway: FastifyPluginAsync<WsGatewayOptions> = async (
     const members: Member[] = rows.map((row) => ({
       ...toPublicUser(row),
       status: registry.isOnline(row.id) ? "online" : "offline",
-      voiceChannelId: null,
+      voiceChannelId: voice.voiceChannelOf(row.id),
     }));
     const channels = listChannels(db).map(toPublicChannel);
     return { user, channels, members };
@@ -105,8 +126,282 @@ const wsGateway: FastifyPluginAsync<WsGatewayOptions> = async (
       isAlive: true,
       authed: false,
       deadline: null,
+      participantId: null,
+      voiceChannelId: null,
     };
     sockets.set(socket, state);
+
+    /** Sends a `{ op, d }` envelope to this socket if it is still OPEN. */
+    const send = (env: Envelope): void => {
+      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(env));
+    };
+
+    /**
+     * Sends `env` to every *other* socket currently in voice `channelId` (the
+     * room-scoped fan-out for `voice.new_producer` / `voice.peer_left` /
+     * `voice.state`). `except` is excluded (e.g. the originating socket).
+     */
+    const broadcastToRoom = (
+      channelId: number,
+      env: Envelope,
+      except?: WebSocket,
+    ): void => {
+      const payload = JSON.stringify(env);
+      for (const [s, st] of sockets) {
+        if (s === except) continue;
+        if (st.voiceChannelId === channelId && s.readyState === s.OPEN) {
+          s.send(payload);
+        }
+      }
+    };
+
+    /**
+     * Single voice-exit path shared by `voice.leave` and `teardown()` (covers
+     * leave, socket close, error, and the heartbeat reaper). Idempotent: a no-op
+     * if this socket is not in voice. Closes the SFU participant, notifies room
+     * peers to drop its consumer (`voice.peer_left`), and broadcasts
+     * `presence.update {voiceChannelId:null}` on the per-user last-in-voice
+     * transition. `participantId` is intentionally NOT reset so a leave-then-rejoin
+     * on the same socket reuses it.
+     */
+    const leaveVoice = (): void => {
+      if (state.voiceChannelId === null || state.participantId === null) return;
+      const channelId = state.voiceChannelId;
+      const participantId = state.participantId;
+      sfu.closeParticipant(channelId, participantId);
+      // Notify peers BEFORE clearing `voiceChannelId` so the room filter matches;
+      // the leaver excludes itself via `except`.
+      broadcastToRoom(
+        channelId,
+        { op: "voice.peer_left", d: { participantId } },
+        socket,
+      );
+      state.voiceChannelId = null;
+      const { lastInVoice } = voice.remove(state.userId!, socket);
+      if (lastInVoice) {
+        registry.broadcast(
+          {
+            op: "presence.update",
+            d: { userId: state.userId, status: "online", voiceChannelId: null },
+          },
+          socket,
+        );
+      }
+    };
+
+    /**
+     * Dispatches an authed `voice.*` op. Each branch validates its `d` defensively
+     * (tolerant: malformed → `return`, never closes the socket, mirroring
+     * `message.send`); SFU throws on unknown channel/participant are caught by the
+     * caller's `.catch()` and answered with `voice.error`. Unknown `voice.*` ops
+     * fall through to a no-op.
+     */
+    const handleVoice = async (op: string, d: unknown): Promise<void> => {
+      switch (op) {
+        case "voice.join": {
+          if (typeof d !== "object" || d === null) return;
+          const channelId = (d as { channelId?: unknown }).channelId;
+          if (typeof channelId !== "number" || !Number.isFinite(channelId)) {
+            return;
+          }
+          const vc = getVoiceChannel(db);
+          if (!vc || vc.id !== channelId) {
+            send({
+              op: "voice.error",
+              d: { op, message: "not a voice channel" },
+            });
+            return;
+          }
+          // Idempotent re-join: reuse the existing participant id; otherwise mint
+          // one. The SFU's own idempotency prevents a second mic track.
+          if (state.participantId === null) {
+            state.participantId = randomUUID();
+          }
+          const participantId = state.participantId;
+          const firstJoin = state.voiceChannelId !== channelId;
+          state.voiceChannelId = channelId;
+          let firstInVoice = false;
+          if (firstJoin) {
+            ({ firstInVoice } = voice.add(state.userId!, socket, channelId));
+          }
+          send({
+            op: "voice.joined",
+            d: {
+              channelId,
+              participantId,
+              rtpCapabilities: sfu.getRtpCapabilities(),
+              producers: sfu.listProducers(channelId, participantId),
+            },
+          });
+          if (firstInVoice) {
+            registry.broadcast(
+              {
+                op: "presence.update",
+                d: {
+                  userId: state.userId,
+                  status: "online",
+                  voiceChannelId: channelId,
+                },
+              },
+              socket,
+            );
+          }
+          return;
+        }
+
+        case "voice.transport": {
+          if (state.voiceChannelId === null || state.participantId === null) {
+            send({ op: "voice.error", d: { op, message: "not in voice" } });
+            return;
+          }
+          const direction = parseDirection(d);
+          if (direction === null) return;
+          const params = await sfu.createTransport(
+            state.voiceChannelId,
+            state.participantId,
+            direction,
+          );
+          send({ op: "voice.transport", d: { direction, ...params } });
+          return;
+        }
+
+        case "voice.connect": {
+          if (state.voiceChannelId === null || state.participantId === null) {
+            send({ op: "voice.error", d: { op, message: "not in voice" } });
+            return;
+          }
+          const direction = parseDirection(d);
+          if (direction === null) return;
+          const dtlsParameters = (d as { dtlsParameters?: unknown })
+            .dtlsParameters;
+          if (typeof dtlsParameters !== "object" || dtlsParameters === null) {
+            return;
+          }
+          await sfu.connectTransport(
+            state.voiceChannelId,
+            state.participantId,
+            direction,
+            dtlsParameters as types.DtlsParameters,
+          );
+          send({ op: "voice.connected", d: { direction } });
+          return;
+        }
+
+        case "voice.produce": {
+          if (state.voiceChannelId === null || state.participantId === null) {
+            send({ op: "voice.error", d: { op, message: "not in voice" } });
+            return;
+          }
+          if (typeof d !== "object" || d === null) return;
+          const rtpParameters = (d as { rtpParameters?: unknown }).rtpParameters;
+          if (typeof rtpParameters !== "object" || rtpParameters === null) {
+            return;
+          }
+          const { producerId } = await sfu.produce(
+            state.voiceChannelId,
+            state.participantId,
+            rtpParameters as types.RtpParameters,
+          );
+          send({ op: "voice.produced", d: { producerId } });
+          broadcastToRoom(
+            state.voiceChannelId,
+            {
+              op: "voice.new_producer",
+              d: { participantId: state.participantId, producerId },
+            },
+            socket,
+          );
+          return;
+        }
+
+        case "voice.consume": {
+          if (state.voiceChannelId === null || state.participantId === null) {
+            send({ op: "voice.error", d: { op, message: "not in voice" } });
+            return;
+          }
+          if (typeof d !== "object" || d === null) return;
+          const producerId = (d as { producerId?: unknown }).producerId;
+          if (typeof producerId !== "string") return;
+          const rtpCapabilities = (d as { rtpCapabilities?: unknown })
+            .rtpCapabilities;
+          if (typeof rtpCapabilities !== "object" || rtpCapabilities === null) {
+            return;
+          }
+          const params = await sfu.consume(
+            state.voiceChannelId,
+            state.participantId,
+            producerId,
+            rtpCapabilities as types.RtpCapabilities,
+          );
+          // null = incompatible caps (`!router.canConsume`) — skip silently.
+          if (params === null) return;
+          send({ op: "voice.consumer", d: { ...params } });
+          return;
+        }
+
+        case "voice.resume": {
+          if (state.voiceChannelId === null || state.participantId === null) {
+            send({ op: "voice.error", d: { op, message: "not in voice" } });
+            return;
+          }
+          if (typeof d !== "object" || d === null) return;
+          const producerId = (d as { producerId?: unknown }).producerId;
+          if (typeof producerId !== "string") return;
+          await sfu.resumeConsumer(
+            state.voiceChannelId,
+            state.participantId,
+            producerId,
+          );
+          send({ op: "voice.resumed", d: { producerId } });
+          return;
+        }
+
+        case "voice.state": {
+          if (state.voiceChannelId === null || state.participantId === null) {
+            send({ op: "voice.error", d: { op, message: "not in voice" } });
+            return;
+          }
+          if (typeof d !== "object" || d === null) return;
+          const muted = (d as { muted?: unknown }).muted;
+          if (typeof muted !== "boolean") return;
+          const rawDeafened = (d as { deafened?: unknown }).deafened;
+          if (rawDeafened !== undefined && typeof rawDeafened !== "boolean") {
+            return;
+          }
+          const deafened = rawDeafened ?? false;
+          // `pauseProducer`/`resumeProducer` are idempotent no-ops if there is no
+          // producer, so rapid toggles and mic-less joins converge safely.
+          if (muted) {
+            sfu.pauseProducer(state.voiceChannelId, state.participantId);
+          } else {
+            sfu.resumeProducer(state.voiceChannelId, state.participantId);
+          }
+          // `deafened` is local playback only — relayed but no server media change.
+          broadcastToRoom(
+            state.voiceChannelId,
+            {
+              op: "voice.state",
+              d: {
+                userId: state.userId,
+                participantId: state.participantId,
+                muted,
+                deafened,
+              },
+            },
+            socket,
+          );
+          return;
+        }
+
+        case "voice.leave": {
+          leaveVoice();
+          return;
+        }
+
+        default:
+          return; // unknown voice op — ignored safely
+      }
+    };
 
     let toreDown = false;
     const teardown = (): void => {
@@ -116,6 +411,10 @@ const wsGateway: FastifyPluginAsync<WsGatewayOptions> = async (
         clearTimeout(state.deadline);
         state.deadline = null;
       }
+      // Release any SFU/voice resources first (idempotent if never in voice) so a
+      // socket close/error/reap drops the participant and notifies room peers
+      // before the online/offline presence step.
+      if (state.authed && state.userId !== null) leaveVoice();
       sockets.delete(socket);
       hub.remove(socket);
       if (state.authed && state.userId !== null) {
@@ -202,8 +501,21 @@ const wsGateway: FastifyPluginAsync<WsGatewayOptions> = async (
         return;
       }
 
-      // Post-auth: `message.send` is the only in-scope inbound op (`voice.*` arrives
-      // in M4). Any other op — including a second `identify` — is ignored safely.
+      // Post-auth voice signaling (`voice.*`). SFU methods are async, so route into
+      // `handleVoice` and `.catch()` so a rejected SFU call never becomes an
+      // unhandled rejection or crashes the socket — it is logged and surfaced as a
+      // `voice.error` frame to the requesting socket.
+      if (op.startsWith("voice.")) {
+        const d = (frame as { d?: unknown }).d;
+        void handleVoice(op, d).catch((err: unknown) => {
+          app.log.error(err);
+          send({ op: "voice.error", d: { op, message: "voice operation failed" } });
+        });
+        return;
+      }
+
+      // Post-auth: `message.send` is the remaining in-scope inbound op. Any other op
+      // — including a second `identify` — is ignored safely.
       if (op !== "message.send") return;
       const d = (frame as { d?: unknown }).d;
       if (typeof d !== "object" || d === null) return;
