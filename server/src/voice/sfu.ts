@@ -69,7 +69,7 @@ const opusCodec: types.RouterRtpCodecCapability = {
 export class VoiceSfu {
   readonly #rtcMinPort: number;
   readonly #rtcMaxPort: number;
-  readonly #announcedIp: string;
+  readonly #announcedIps: string[];
   readonly #rooms = new Map<number, VoiceRoom>();
   #worker: types.Worker | null = null;
   #router: types.Router | null = null;
@@ -77,7 +77,7 @@ export class VoiceSfu {
   constructor(config: Config) {
     this.#rtcMinPort = config.rtcMinPort;
     this.#rtcMaxPort = config.rtcMaxPort;
-    this.#announcedIp = config.publicHost;
+    this.#announcedIps = config.rtcAnnouncedIps;
   }
 
   /**
@@ -119,7 +119,10 @@ export class VoiceSfu {
     const router = this.#requireRouter();
     const participant = this.#getOrCreateParticipant(channelId, participantId);
     const transport = await router.createWebRtcTransport({
-      listenIps: [{ ip: "0.0.0.0", announcedIp: this.#announcedIp }],
+      // One listen entry per announced IP: the public IP for remote clients plus any
+      // LAN IP (RTC_EXTRA_ANNOUNCED_IPS) so same-network clients avoid NAT hairpin.
+      // ICE tries every candidate and keeps whichever pair connects.
+      listenIps: this.#announcedIps.map((announcedIp) => ({ ip: "0.0.0.0", announcedIp })),
       enableUdp: true,
       enableTcp: true,
       preferUdp: true,

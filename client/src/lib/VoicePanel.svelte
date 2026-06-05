@@ -50,18 +50,33 @@
       {/if}
     </div>
 
+    {#if inVoice && voice.audioBlocked}
+      <button type="button" class="enable-audio" onclick={() => voice.enableAudio()}>
+        🔈 Tap to enable audio
+      </button>
+    {/if}
+
     {#if inVoice}
       <ul class="in-voice">
         <li class="member">
           <span class="dot online"></span>
           <span class="name">{selfName} (you)</span>
           {#if voice.muted}<span class="muted-marker" title="Muted">🔇</span>{/if}
+          <span class="meter" title="Mic input level">
+            <span class="meter-fill" style:width={`${Math.round(voice.localLevel * 100)}%`}></span>
+          </span>
         </li>
         {#each voice.participants as p (p.participantId)}
           <li class="member">
             <span class="dot online"></span>
             <span class="name">{participantName(p.userId, p.participantId)}</span>
             {#if p.muted}<span class="muted-marker" title="Muted">🔇</span>{/if}
+            <span class="meter" title="Incoming audio level">
+              <span
+                class="meter-fill"
+                style:width={`${Math.round(voice.levelFor(p.participantId) * 100)}%`}
+              ></span>
+            </span>
           </li>
         {/each}
       </ul>
@@ -138,6 +153,28 @@
   .muted-marker {
     color: var(--muted);
     font-size: 0.85rem;
+  }
+  .meter {
+    margin-left: auto;
+    width: 3.5rem;
+    height: 0.4rem;
+    border-radius: 0.2rem;
+    background: var(--bg-elevated, rgba(255, 255, 255, 0.08));
+    overflow: hidden;
+    flex: none;
+  }
+  .meter-fill {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: var(--ok);
+    transition: width 60ms linear;
+  }
+  .enable-audio {
+    margin: 0.4rem 0 0;
+    background: var(--accent);
+    color: var(--text);
+    font-weight: 500;
   }
   .err {
     color: var(--err, #f87171);
