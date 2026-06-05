@@ -208,7 +208,8 @@ const wsGateway: FastifyPluginAsync<WsGatewayOptions> = async (
       if (trimmed.length === 0 || content.length > config.maxMessageLength) {
         return;
       }
-      // `attachmentId` is accepted on the wire but ignored in M2 (stored NULL).
+      // `attachmentId` is accepted on the wire but not yet linked here; the
+      // validate-and-link flow (ownership + link-once) arrives in story 003.
       if (!getChannelById(db, channelId)) return;
       const row = insertMessage(db, {
         channelId,
@@ -219,7 +220,7 @@ const wsGateway: FastifyPluginAsync<WsGatewayOptions> = async (
       // No `except`: the sender gets its own echo so it renders the authoritative row.
       hub.broadcast({
         op: "message.create",
-        d: { message: toPublicMessage(row) },
+        d: { message: toPublicMessage(row, null) },
       });
     });
 

@@ -95,7 +95,7 @@ const channelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = async (
         maxLimit: config.messageHistoryMaxLimit,
       });
       const rows = getChannelMessages(db, id, { before: request.query.before, limit });
-      return reply.send(rows.map(toPublicMessage));
+      return reply.send(rows.map((r) => toPublicMessage(r.message, r.attachment)));
     },
   );
 };

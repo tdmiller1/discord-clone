@@ -1,5 +1,11 @@
 import type { Db } from "./db.js";
-import type { ChannelRow, MessageRow } from "./types.js";
+import type { AttachmentRow, ChannelRow, MessageRow } from "./types.js";
+
+/** A message read together with its embedded attachment (or `null`). */
+export type MessageWithAttachment = {
+  message: MessageRow;
+  attachment: AttachmentRow | null;
+};
 
 /**
  * Single source of truth for channel + message persistence (SPEC.md §8/§9).
@@ -87,27 +93,104 @@ export function insertMessage(
 }
 
 /**
+ * The shape of a `messages LEFT JOIN attachments` row: every `messages` column
+ * plus the `attachments` columns aliased with an `a_` prefix (all NULL when the
+ * message has no linked attachment). {@link splitMessageRow} divides it back into
+ * a `MessageRow` and an `AttachmentRow | null`.
+ */
+type MessageJoinRow = MessageRow & {
+  a_id: number | null;
+  a_message_id: number | null;
+  a_uploader_id: number | null;
+  a_filename: string | null;
+  a_content_type: string | null;
+  a_size: number | null;
+  a_width: number | null;
+  a_height: number | null;
+  a_path: string | null;
+  a_created_at: number | null;
+};
+
+const MESSAGE_JOIN_COLUMNS =
+  "m.id, m.channel_id, m.author_id, m.content, m.attachment_id, m.created_at, " +
+  "a.id AS a_id, a.message_id AS a_message_id, a.uploader_id AS a_uploader_id, " +
+  "a.filename AS a_filename, a.content_type AS a_content_type, a.size AS a_size, " +
+  "a.width AS a_width, a.height AS a_height, a.path AS a_path, a.created_at AS a_created_at";
+
+/** Splits a `messages LEFT JOIN attachments` row into its message + attachment halves. */
+function splitMessageRow(raw: MessageJoinRow): MessageWithAttachment {
+  const message: MessageRow = {
+    id: raw.id,
+    channel_id: raw.channel_id,
+    author_id: raw.author_id,
+    content: raw.content,
+    attachment_id: raw.attachment_id,
+    created_at: raw.created_at,
+  };
+  const attachment: AttachmentRow | null =
+    raw.a_id === null
+      ? null
+      : {
+          id: raw.a_id,
+          message_id: raw.a_message_id,
+          uploader_id: raw.a_uploader_id as number,
+          filename: raw.a_filename as string,
+          content_type: raw.a_content_type as string,
+          size: raw.a_size as number,
+          width: raw.a_width,
+          height: raw.a_height,
+          path: raw.a_path as string,
+          created_at: raw.a_created_at as number,
+        };
+  return { message, attachment };
+}
+
+/**
  * Keyset history page for a channel, newest-first (`ORDER BY id DESC`). When
  * `before` is a finite number, only rows with `id < before` are returned (the
  * exclusive cursor), so the caller can page backwards. `limit` is used as-given;
  * callers resolve it via {@link clampHistoryLimit} first. The
  * `idx_messages_channel_id` index on `(channel_id, id)` covers this query.
+ *
+ * Each row is `LEFT JOIN`ed to `attachments` so the returned pair carries its
+ * embedded attachment (or `null`) in a single round-trip — no N+1 per-row lookups.
  */
 export function getChannelMessages(
   db: Db,
   channelId: number,
   opts: { before?: number; limit: number },
-): MessageRow[] {
+): MessageWithAttachment[] {
   if (opts.before !== undefined && Number.isFinite(opts.before)) {
-    return db
+    const rows = db
       .prepare(
-        "SELECT * FROM messages WHERE channel_id = ? AND id < ? ORDER BY id DESC LIMIT ?",
+        `SELECT ${MESSAGE_JOIN_COLUMNS} FROM messages m LEFT JOIN attachments a ON a.id = m.attachment_id WHERE m.channel_id = ? AND m.id < ? ORDER BY m.id DESC LIMIT ?`,
       )
-      .all(channelId, opts.before, opts.limit) as MessageRow[];
+      .all(channelId, opts.before, opts.limit) as MessageJoinRow[];
+    return rows.map(splitMessageRow);
   }
-  return db
-    .prepare("SELECT * FROM messages WHERE channel_id = ? ORDER BY id DESC LIMIT ?")
-    .all(channelId, opts.limit) as MessageRow[];
+  const rows = db
+    .prepare(
+      `SELECT ${MESSAGE_JOIN_COLUMNS} FROM messages m LEFT JOIN attachments a ON a.id = m.attachment_id WHERE m.channel_id = ? ORDER BY m.id DESC LIMIT ?`,
+    )
+    .all(channelId, opts.limit) as MessageJoinRow[];
+  return rows.map(splitMessageRow);
+}
+
+/**
+ * Reads a single message with its embedded attachment (same `LEFT JOIN` parity as
+ * {@link getChannelMessages}). Used by the gateway broadcast (story 003) so a live
+ * `message.create` carries the just-linked attachment identically to history.
+ */
+export function getMessageWithAttachment(
+  db: Db,
+  id: number,
+): MessageWithAttachment | undefined {
+  const raw = db
+    .prepare(
+      `SELECT ${MESSAGE_JOIN_COLUMNS} FROM messages m LEFT JOIN attachments a ON a.id = m.attachment_id WHERE m.id = ?`,
+    )
+    .get(id) as MessageJoinRow | undefined;
+  return raw === undefined ? undefined : splitMessageRow(raw);
 }
 
 /**
