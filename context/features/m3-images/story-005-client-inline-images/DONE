@@ -1,0 +1,35 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| Inline image for any message with non-null `attachment`, live + reloaded history, structurally identical, deduped by id | PASS | MessagePane.svelte:221-223 renders `<InlineImage>` for `msg.attachment !== null` inside `{#each messages as msg (msg.id)}` (line 214). Live `message.create` and REST history both flow through gateway.svelte.ts `upsertMessage` (line 73,109) / `prependHistory` (line 237), keyed/deduped by id — same render path for both. types.ts:60-67 `PublicMessage` carries `attachment: PublicAttachment | null`. |
+| Auth-checked bytes via Bearer fetch → object URL, revoked on unmount/replacement, id-cached so scrollback doesn't re-fetch | PASS | attachmentImages.ts:43-45 `fetch` with `Authorization: Bearer ${token}`, 56 `URL.createObjectURL(await res.blob())`. Module-scope `cache` Map (23) keyed by id (61,77-78); `inflight` Map (24,80-87) dedupes concurrent first-mounts. InlineImage.svelte:52-57 effect cleanup revokes superseded/uncached URL only (never the still-cached shared one — `cachedObjectUrl` guard line 54). |
+| CSS-only scaling (max w/h, aspect ratio preserved, no thumbnails); width/height may reserve layout space | PASS | InlineImage.svelte:82-90 `.inline-image img` max-width min(400px,100%), max-height 320px, object-fit contain. aspect-ratio derived from `attachment.width/height` (15-19) applied to img + loading box (67,74) to reserve space and avoid reflow. |
+| Loading spinner/placeholder + graceful "image unavailable" on 401/404/network; no broken-image crash or unhandled rejection | PASS | Three states in InlineImage.svelte:61-78 (ok/error/loading). attachmentImages.ts maps 401→unauthorized, 404→not_found (27-31), network try/catch (46,57), never throws — always returns a discriminated result. Error state shows "Image unavailable" div (70), never a broken `<img>`. |
+| Image-only (empty content) renders just the image; text+image renders both | PASS | MessagePane.svelte:218 renders `.content` only when `msg.content.trim() !== ""`; 221 renders image independently when attachment present. |
+| Survives reload — re-fetched history images reappear inline | UNTESTABLE (manual) | No test runner. History fetch embeds same `attachment` shape; on relaunch rows re-render cold-cache and re-fetch bytes. Manual: post image, reload client, image reappears from persisted history. |
+| `npm run typecheck` passes; two-client live + reload check works | PASS (typecheck) / UNTESTABLE (two-client) | typecheck: 0 errors, 1 warning (pre-existing story-004 `fileInput` bind:this non-`$state`, acceptable). Two-client live+reload is a manual check. |
+
+Quality:
+- Svelte 5 runes ($state/$props/$derived/$effect) used in InlineImage.svelte; plain non-runes .ts for attachmentImages.ts. PASS
+- Client imports have no `.js` suffix (./attachmentImages, ./types, ./authStore.svelte). PASS
+- Auth-fetch→object-URL helper follows discriminated-Result + Bearer pattern (mirrors messages.ts). PASS
+- Object URLs revoked + cache cleared on logout (App.svelte:49) and session-invalid (App.svelte:61) via clearCache(). PASS
+- No TODO/placeholder text. No files over 1000 lines (largest changed file 385 lines). PASS
+
+Documentation: no doc updates required — frontend-only leaf story, no protocol/schema/contract change; SPEC.md §10 already states "client renders images inline". No churn needed.
+
+Suggested commit message:
+feat(client): render attachments inline in the message pane
+
+Render images inline in MessagePane for any message with a non-null
+embedded attachment, both live (message.create) and from reloaded
+history. Add attachmentImages.ts (Bearer fetch -> blob -> session-cached
+object URL, in-flight deduped, discriminated Result) and InlineImage.svelte
+(per-image $effect lifecycle with loading/error states, CSS-only scaling,
+aspect-ratio reservation, revoke-on-replacement). Fix PublicMessage to
+embed attachment: PublicAttachment | null. Clear the image cache on
+logout/session-invalid.
