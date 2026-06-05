@@ -38,10 +38,17 @@ const _memberList = $derived(
   }),
 );
 
-/** Text channels only (voice is M4), sorted by position then id for a stable list. */
+/** Text channels only, sorted by position then id for a stable list. */
 const _channelList = $derived(
   [..._channels.values()]
     .filter((c) => c.type === "text")
+    .sort((a, b) => a.position - b.position || a.id - b.id),
+);
+
+/** Voice channels only (M4), parallel to _channelList so text consumers stay text-only. */
+const _voiceChannelList = $derived(
+  [..._channels.values()]
+    .filter((c) => c.type === "voice")
     .sort((a, b) => a.position - b.position || a.id - b.id),
 );
 
@@ -205,6 +212,11 @@ export const gateway = {
   /** Text channels sorted by position then id, seeded from `ready` + appended on `channel.create`. */
   get channels(): PublicChannel[] {
     return _channelList;
+  },
+  /** Voice channels sorted by position then id — a parallel surface to `channels` (which stays
+   * text-only) so voice is a separate control and never enters the message-pane selection path. */
+  get voiceChannels(): PublicChannel[] {
+    return _voiceChannelList;
   },
   /** Connection status for the UI status line. */
   get status(): ConnStatus {
