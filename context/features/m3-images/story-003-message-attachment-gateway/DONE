@@ -1,0 +1,18 @@
+Validated: 2026-06-04
+Branch: main
+
+Acceptance Criteria:
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| message.send honors attachmentId: getAttachmentById + validates exists/uploader_id===sender/message_id IS NULL, rejects without persisting | PASS | gateway.ts:238-248 |
+| On success persists with attachment_id set, linkAttachmentToMessage atomically (one transaction), broadcasts message.create embedding attachment | PASS | gateway.ts:250-274 (db.transaction) |
+| Content empty iff valid attachment; neither rejected; max-length still applies | PASS | gateway.ts:228-232 |
+| No attachmentId behaves exactly as M2 (attachment: null), no regression | PASS | gateway.ts:217,256,268-273 |
+| History endpoint returns embedded attachment; live + reloaded structurally identical, dedupe by id | PASS | story 001 LEFT JOIN unchanged; contract:109-114 |
+| typecheck passes; e2e via wscat | PASS (typecheck) / UNTESTABLE (manual e2e) | typecheck exit 0 |
+| contracts/message-attachment-flow.md documents rules + embedded shape for 004/005 | PASS | 138-line contract present |
+
+Quality: ESM .js imports OK; no new process.env (reuses config.maxMessageLength); atomic insert+link transaction; stale comment replaced; no TODO/placeholder; gateway.ts 313 lines.
+
+Suggested commit message:
+feat(gateway): link attachmentId on message.send and embed attachment in broadcasts
