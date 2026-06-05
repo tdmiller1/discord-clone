@@ -1,13 +1,20 @@
 import websocket, { type WebSocket } from "@fastify/websocket";
 import type { FastifyInstance, FastifyPluginAsync } from "fastify";
 import type { RawData } from "ws";
+import { getAttachmentById, linkAttachmentToMessage } from "../attachments.js";
 import { authenticateSession } from "../auth.js";
-import { getChannelById, insertMessage, listChannels } from "../channels.js";
+import {
+  getChannelById,
+  getMessageWithAttachment,
+  insertMessage,
+  listChannels,
+} from "../channels.js";
 import type { Config } from "../config.js";
 import {
   toPublicChannel,
   toPublicMessage,
   toPublicUser,
+  type AttachmentRow,
   type Member,
   type ReadyPayload,
   type UserRow,
@@ -204,23 +211,66 @@ const wsGateway: FastifyPluginAsync<WsGatewayOptions> = async (
       if (typeof channelId !== "number" || !Number.isFinite(channelId)) return;
       const content = (d as { content?: unknown }).content;
       if (typeof content !== "string") return;
+      const rawAttachmentId = (d as { attachmentId?: unknown }).attachmentId;
+      let hasAttachment = false;
+      let attachmentId = 0;
+      if (rawAttachmentId !== undefined && rawAttachmentId !== null) {
+        if (
+          typeof rawAttachmentId !== "number" ||
+          !Number.isInteger(rawAttachmentId) ||
+          rawAttachmentId <= 0
+        ) {
+          return;
+        }
+        hasAttachment = true;
+        attachmentId = rawAttachmentId;
+      }
       const trimmed = content.trim();
-      if (trimmed.length === 0 || content.length > config.maxMessageLength) {
+      if (content.length > config.maxMessageLength) return;
+      // Empty/whitespace content is only allowed when a valid attachment carries
+      // the message (image-only); otherwise content is required (M2 rule).
+      if (trimmed.length === 0 && !hasAttachment) return;
+      if (!getChannelById(db, channelId)) return;
+      // Validate the attachment before persisting: it must exist, belong to the
+      // sender, and be unlinked (`message_id IS NULL`). `linkAttachmentToMessage`
+      // does not check ownership/existence, so this is the authoritative gate; the
+      // in-transaction link-once assertion below is the concurrency backstop.
+      let attachment: AttachmentRow | undefined;
+      if (hasAttachment) {
+        attachment = getAttachmentById(db, attachmentId);
+        if (
+          !attachment ||
+          attachment.uploader_id !== state.userId ||
+          attachment.message_id !== null
+        ) {
+          return;
+        }
+      }
+      let messageId: number;
+      try {
+        messageId = db.transaction(() => {
+          const row = insertMessage(db, {
+            channelId,
+            authorId: state.userId!,
+            content,
+            attachmentId: hasAttachment ? attachmentId : null,
+          });
+          if (hasAttachment) {
+            const linked = linkAttachmentToMessage(db, attachmentId, row.id);
+            if (!linked) throw new Error("attachment link race");
+          }
+          return row.id;
+        })();
+      } catch {
+        // A link race rolled back the inserted message; drop the frame silently.
         return;
       }
-      // `attachmentId` is accepted on the wire but not yet linked here; the
-      // validate-and-link flow (ownership + link-once) arrives in story 003.
-      if (!getChannelById(db, channelId)) return;
-      const row = insertMessage(db, {
-        channelId,
-        authorId: state.userId!,
-        content,
-        attachmentId: null,
-      });
+      const result = getMessageWithAttachment(db, messageId);
+      if (!result) return;
       // No `except`: the sender gets its own echo so it renders the authoritative row.
       hub.broadcast({
         op: "message.create",
-        d: { message: toPublicMessage(row, null) },
+        d: { message: toPublicMessage(result.message, result.attachment) },
       });
     });
 
