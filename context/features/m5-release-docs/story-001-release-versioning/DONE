@@ -1,0 +1,40 @@
+Validated: 2026-06-04
+Branch: feat/public-deploy-tunnel-web-voice
+
+Acceptance Criteria:
+
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| Version drift resolved — root/server/client `package.json` and `tauri.conf.json` all agree at rest | PASS | All four read `0.2.0` (verified via `node -p`); `tauri.conf.json` line 4 reconciled `0.1.0`→`0.2.0`. Cargo.toml line 3, Cargo.lock discord-clone entry, and server/src/app.ts:123 GET "/" literal also reconciled. No stray `0.1.0` left in tracked source/config. |
+| Documented tag → version convention with a concrete mechanism | PASS | `contracts/versioning.md` records `vX.Y.Z` tag scheme + `${GITHUB_REF_NAME#v}` derivation; ci.yml adds a committed-version + guard mechanism (release-version-guard job). |
+| Guard fails the release on tag/committed mismatch (committed-version path) | PASS | ci.yml `release-version-guard` compares `${GITHUB_REF_NAME#v}` to `node -p require('./package.json').version` and `exit 1`s on mismatch. Simulated: v0.2.0 passes, v0.3.0 exits 1. No build-time mutation/commit churn. |
+| No new third place to maintain the version; convention reduces edited spots | PASS | No new committed version literal added; guard *reads* root `package.json`, holds no copy. Contract documents (does not duplicate as editable) the value. |
+| `npm run typecheck` passes; `tauri.conf.json` valid / client still builds | PASS | typecheck: 0 errors (1 pre-existing unrelated warning in MessagePane.svelte). tauri.conf.json parses as valid JSON; ci.yml parses as valid YAML. |
+| `contracts/versioning.md` records tag scheme, where version lives, derivation, guard behavior for 002/003/005 | PASS | Contract present (122 lines) with all required sections + downstream-derivation values for stories 002/003/005. |
+
+Quality checks:
+- Honors hard rules: ESM `.js` extensions untouched (app.ts only changed a string literal); no new env/config; no Svelte changes; no UDP port-range change. PASS
+- No leftover TODO/placeholder text. PASS
+- No files over 1000 lines (largest changed: app.ts 128). PASS
+- Cargo.lock change touched ONLY the discord-clone package entry (line 788); dep crates leb128fmt/vswhom/windows-threading still at 0.1.0, untouched. PASS
+
+Documentation audit: SPEC.md §5 already states "CI builds all three from tagged releases" (matches the convention); detailed derivation lives in contracts/versioning.md. README/ops docs belong to story-005 (deferred). No doc update required for this story.
+
+Static checks:
+- npm run typecheck: PASS (server tsc --noEmit + client svelte-check, 0 errors)
+- tauri.conf.json JSON parse: PASS
+- .github/workflows/ci.yml YAML parse: PASS
+
+Suggested commit message:
+
+feat(release): single source-of-truth version from git tag
+
+Reconcile all drifted version literals to 0.2.0 (tauri.conf.json, Cargo.toml,
+Cargo.lock discord-clone entry, server GET "/" route) so every version field
+agrees at rest, and establish the vX.Y.Z tag convention with a CI
+release-version-guard job that fails the release when a pushed tag does not
+match the committed root package.json version. Records the canonical source,
+${GITHUB_REF_NAME#v} derivation, and guard behavior in contracts/versioning.md
+for stories 002/003/005.
+
+Story: story-001-release-versioning

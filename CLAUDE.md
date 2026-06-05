@@ -29,10 +29,11 @@ There is **no test runner configured yet** — `npm run typecheck` is the only g
 
 ## Architecture
 
-Monorepo, two deployables plus the SQLite/image volume:
+Monorepo, three deployables plus the SQLite/image volume:
 
 - **`server/`** — Node + TypeScript backend, shipped as the Docker image. Will own the REST API, the WebSocket gateway (`{ "op": ..., "d": ... }` JSON envelopes, `SPEC.md §7`), the mediasoup SFU (server-routed WebRTC audio, `§11`), SQLite via `better-sqlite3`, and Argon2 password hashing. Stack chosen in `SPEC.md §13`; most of these deps aren't installed yet.
 - **`client/`** — Tauri desktop app. `src/` is the Svelte 5 + TS webview frontend (owns all UI and WebRTC via `getUserMedia`/`RTCPeerConnection`); `src-tauri/` is the thin Rust shell (OS keychain for the session token, window, packaging). Build outputs: `.msi`/`.exe` (Windows), `.AppImage`/`.deb` (Linux).
+- **`client/` web build** — the same `src/` webview, built with `vite build` and served as static files by nginx (`client/Dockerfile.web` + `client/nginx.conf`), shipped as the `web` service in `docker-compose.yml`. Lets browsers (e.g. a phone) use the app without installing the desktop client. `VITE_SERVER_URL` is baked in at build time so the hosted bundle defaults to the public API URL (see `client/src/lib/config.ts`); users can still override the server URL on the login screen. The desktop/`npm run dev` builds leave it unset and fall back to `localhost:8080`.
 
 Key flows to know before touching auth or voice: token-bootstrapped accounts (admin mints an invite token → client registers username+password → logs in → opaque server-side session, revocable) in `SPEC.md §6`; SFU-lite voice (clients publish an Opus track, server forwards to others — no client mesh) in `§11`. The SQLite schema is `§8`.
 

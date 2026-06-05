@@ -1,0 +1,31 @@
+Validated: 2026-06-05
+Branch: feat/public-deploy-tunnel-web-voice
+
+Acceptance Criteria:
+
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| 1. README expanded into an ordered deploy runbook (prod compose → HTTPS/WSS → mint token → download/install client → register/login → confirm text/images/voice) | PASS | README.md:34-179 — `## Deploy (admin runbook)` with prerequisites + 6 ordered steps. Step 3 (README:111-129) documents the REAL token-based onboarding (mint-token → first user registers) and a `>` note correctly flags SPEC §12's "admin bootstrap credential in logs" as unimplemented rather than instructing a search for a non-existent log line. |
+| 2. Every command runnable as written (correct ghcr.io path, asset filenames, env vars, verified mint-token form) | PASS | mint-token uses the verified runnable `docker compose exec server node dist/cli.js mint-token` (README:119, DEPLOYMENT:111). The non-working `server mint-token` appears ONLY in DEPLOYMENT:107 as an explanatory "this fails" note, not as an invocation. Image ref, Release URLs, four installer filenames, env vars all verbatim from contracts. |
+| 3. Production gotchas: real PUBLIC_HOST (voice fails on localhost), open UDP media range, unsigned-binary warnings, HTTPS/WSS required | PASS | PUBLIC_HOST≠localhost (README:50,69-71,175-178; DEPLOYMENT:19,134-138); UDP 40000-40010 firewall+forward (README:49-50,176-177; DEPLOYMENT:139-141); unsigned-binary SmartScreen/AppImage (README:152-154); HTTPS/WSS required §12 (README:103; DEPLOYMENT:149). |
+| 4. Ops doc covers env-var reference, /data backup & restore, user/token mgmt (revoke-user/revoke-token), supported arch (amd64/glibc), voice/ICE troubleshooting | PASS | docs/DEPLOYMENT.md: env table (11-43), arch (45-61), backup/restore (62-101), user/token mgmt (103-126), voice/ICE (128-145), TLS options (147-158). All env defaults match server/.env.example + deploy contract verbatim. |
+| 5. Dev vs prod unambiguous | PASS | README `## Dev vs prod` (24-32) + runbook lead-in (38-39); DEPLOYMENT lead-in (3-9); DEVELOPMENT cross-link (12-14). Contributors → root compose + DEVELOPMENT.md; admins → deploy/ compose + runbook. |
+| 6. Verified end-to-end (SPEC §14); DONE notes record what was run + outcome | UNTESTABLE (verification performed to the extent possible) | A true clean-host bring-up needs a live domain whose DNS resolves to the host + a real Let's Encrypt cert + two connected clients doing text/images/voice — not reproducible in this sandbox. What WAS verified: `npm run typecheck` green; cli.ts surface matches docs (3 subcommands, no flags); `node dist/cli.js` is the runnable bin form (server/package.json bin "server"→dist/cli.js); gateway.svelte.ts:70 confirms wss:// is derived from https://; all contract literals grep-matched verbatim; env defaults match server/.env.example + deploy compose; SPEC §12 bootstrap-credential claim confirmed unimplemented. Plan/research note the mint-token form was empirically run against the locally-built image (exit 0). Manual completion step for the operator: stand up deploy/ on a real host with DNS + cert, mint a token, install an installer, register, and confirm text/images/voice. |
+| 7. npm run typecheck still passes | PASS | `npm run typecheck` → 0 errors (1 pre-existing svelte-check warning in MessagePane.svelte, unrelated to this docs-only change). |
+
+Validation checks run:
+- npm run typecheck — PASS (0 errors).
+- Files changed in implement commit 369a4c3 — README.md, docs/DEPLOYMENT.md, docs/DEVELOPMENT.md (+ the `implemented` pipeline marker). No code/compose/Caddy edits. PASS.
+- Internal relative links resolve: README→docs/DEPLOYMENT.md, →docs/DEVELOPMENT.md OK; DEPLOYMENT→../README.md, →DEVELOPMENT.md, →../server/.env.example OK; DEVELOPMENT→../README.md, →DEPLOYMENT.md OK. SPEC.md cited by section as inline prose (house style), not a clickable link; file exists. PASS.
+- Verbatim contract values grep-confirmed: ghcr.io/tdmiller1/discord-clone-server:<version>/:latest; v<version> Release URLs + latest shortcut; four installer filenames; PUBLIC_HOST/CADDY_SITE; 40000-40010/udp; cd deploy → cp .env.example .env → docker compose up -d. PASS.
+- No leftover TODO/placeholder (the one "<version> placeholders" hit is intentional prose). Files 178/158/76 lines, all <1000. PASS.
+
+Documentation audit (operator + end-user journey):
+- Deploy server (GHCR image + compose + Caddy TLS): README §1-2 / deploy-compose.md + server-image.md — Correct.
+- Mint invite token: README §3 + DEPLOYMENT user/token mgmt / cli.ts + SPEC §6 — Correct (runnable form).
+- Download installer from GitHub Release: README §4 / release-assets.md — Correct (verbatim filenames + URLs).
+- Register/login: README §5 / SPEC §6 + gateway.svelte.ts — Correct (wss derived from https).
+- Text + images + voice: README §6 + DEPLOYMENT voice/ICE / SPEC §9/§10/§11 + deploy-compose.md — Correct.
+
+Suggested commit message:
+docs: add verified deploy runbook + operations reference (M5 story 005)

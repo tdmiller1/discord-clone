@@ -1,0 +1,24 @@
+Validated: 2026-06-04
+Branch: feat/public-deploy-tunnel-web-voice
+
+Acceptance Criteria:
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| On `v*` tag push, client builds on ubuntu+windows (reusing matrix/deps/icons/`tauri build`) and `.msi`/`.exe` + `.AppImage`/`.deb` attached to a GitHub Release (not just ephemeral artifacts) | PASS | Matrix `os: [ubuntu-latest, windows-latest]` (ci.yml:62-63) reused; new tag-gated step uploads via `softprops/action-gh-release@v2` (ci.yml:102-112). Build steps unchanged. |
+| Release created/reused for the tag, named/tagged from story 001's version (`v<version>`), installers uploaded as release assets with version-stamped names | PASS | `tag_name: ${{ github.ref_name }}` (ci.yml:106) = `v<version>`; tauri.conf.json `productName: discord-clone` + `version: 0.2.0` stamp the filenames. Matches versioning.md derivation. |
+| A missing installer fails the release (replaces tolerant `if-no-files-found: warn` for the release path) | PASS | `fail_on_unmatched_files: true` (ci.yml:107); tolerant `if-no-files-found: warn` stays only on the ephemeral artifact step (ci.yml:101) for push/PR. |
+| Idempotent / re-runnable: re-running for an existing tag uploads cleanly (clobber/replace), no "release already exists"/duplicates | UNTESTABLE | Requires a real tag push + re-run. `action-gh-release@v2` provides this natively; wiring correct. Documented in contract Idempotency section. |
+| Job has `contents: write` to create Release + upload via `GITHUB_TOKEN` | PASS | Job-level `permissions: contents: write` (ci.yml:58-59); action defaults to implicit `GITHUB_TOKEN`. |
+| Per-change CI's `tauri build` + artifact-upload job remains intact for push/PR (release path is additive) | PASS | `upload-artifact@v4` step (ci.yml:92-101) unchanged; release step purely additive and tag-gated. |
+| `contracts/release-assets.md` records Release URL/tag pattern, exact per-OS asset filenames/extensions, and "release fails if installer missing" guarantee | PASS | Present: tag/name `v<version>` (lines 29-39), URL pattern (lines 42-59), 4 asset filenames table (lines 67-81), missing-installer guarantee (lines 94-99). |
+| Acceptance verification: pushing a test `v*` tag yields a Release whose assets include a Windows installer + Linux `.AppImage`; download+launch the Linux artifact | UNTESTABLE | Requires a real tag push, GitHub Release, and human download+launch. Manual: `git tag v0.2.0 && git push origin v0.2.0`, confirm Release at releases/tag/v0.2.0 has all 4 assets, then `chmod +x` and launch the `.AppImage`. |
+
+Checks:
+- npm run typecheck (repo root): PASS (0 errors; 1 pre-existing unrelated svelte-check warning in src/lib/MessagePane.svelte)
+- ci.yml parses as YAML: PASS
+- All four jobs present (release-version-guard, server, client, release-server-image): PASS
+- client job has `permissions: contents: write` + tag-gated `softprops/action-gh-release@v2` step: PASS
+- Changes confined to client job (server/guard/release-server-image jobs untouched): PASS (git show 5be8df8)
+
+Suggested commit message:
+ci(release): attach Windows/Linux installers to GitHub Release on v* tags
