@@ -1,0 +1,24 @@
+# PRODUCTION Caddy config for the discord-clone server.
+#
+# Caddy auto-provisions and renews a Let's Encrypt cert for {$CADDY_SITE} and
+# reverse-proxies everything to the server container. `reverse_proxy` forwards
+# the WebSocket Upgrade/Connection headers AUTOMATICALLY — do NOT add manual
+# header rules; the /ws gateway (and voice signaling that rides it) works over
+# WSS with no extra config. The single proxied origin serves the whole API:
+# https://{$CADDY_SITE}  ->  /, /health, /api/*, attachment streams
+# wss://{$CADDY_SITE}/ws ->  the gateway + voice signaling
+#
+# WebRTC MEDIA bypasses Caddy entirely. The UDP range 40000-40010/udp is raw
+# DTLS-SRTP, not HTTP — Caddy only handles 80/443 TCP. That range reaches the
+# `server` container directly via the compose UDP port mapping and must be
+# allowed by the host firewall + UDP-forwarded on the router to PUBLIC_HOST.
+
+# Global options: register the ACME account with the operator's email. Caddy
+# still issues certs if CADDY_ACME_EMAIL is empty (just no account email).
+{
+	email {$CADDY_ACME_EMAIL}
+}
+
+{$CADDY_SITE} {
+	reverse_proxy server:8080
+}

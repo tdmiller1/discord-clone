@@ -4,7 +4,9 @@ services:
     image: discord-clone-server:dev
     ports:
       - "8080:8080"
-      # UDP media range for the SFU (used from M4 onward). Keep in sync with RTC_*_PORT.
+      # UDP media range for the SFU (used from M4 onward). Canonical range is
+      # 40000-40010; must equal RTC_MIN_PORT/RTC_MAX_PORT here, in
+      # server/.env.example, and in deploy/ (CLAUDE.md gotcha — keep all in sync).
       - "40000-40010:40000-40010/udp"
     environment:
       NODE_ENV: production
