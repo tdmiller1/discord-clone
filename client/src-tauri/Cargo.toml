@@ -1,6 +1,6 @@
 [package]
 name = "discord-clone"
-version = "0.2.1"
+version = "0.3.0"
 description = "discord-clone desktop client"
 authors = ["discord-clone"]
 edition = "2021"
@@ -19,6 +19,13 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+
+# Linux only: WebKitGTK does not enable media capture or grant getUserMedia by
+# default, so the voice channel reports "0 devices" even when the OS mic works.
+# We reach the underlying WebView via tauri's `with_webview` to fix that in run().
+# Pin to the exact version wry uses (=2.0.2 / v2_40) so the `inner()` types match.
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "=2.0.2", features = ["v2_40"] }
 
 [profile.release]
 panic = "abort"

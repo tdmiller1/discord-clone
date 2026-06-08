@@ -32,9 +32,42 @@ fn delete_session() -> Result<(), String> {
     }
 }
 
+/// On Linux, WebKitGTK ships with media capture turned off and denies the
+/// `getUserMedia` permission request unless the embedder opts in. Without this the
+/// voice channel sees "0 devices" even when the OS mic works fine. wry/Tauri do not
+/// configure either, so we reach the underlying WebView and do it ourselves.
+/// No-op on macOS/Windows, whose webviews grant capture via the OS prompt.
+#[cfg(target_os = "linux")]
+fn enable_webkit_media_capture(app: &tauri::App) {
+    use tauri::Manager;
+    use webkit2gtk::{PermissionRequestExt, SettingsExt, WebViewExt};
+
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let _ = window.with_webview(|webview| {
+        let wv = webview.inner();
+        if let Some(settings) = WebViewExt::settings(&wv) {
+            settings.set_enable_media_stream(true);
+            settings.set_enable_webrtc(true);
+        }
+        // The webview only ever loads our own bundle, so granting permission
+        // requests (mic via UserMedia + enumerateDevices labels via DeviceInfo) is safe.
+        wv.connect_permission_request(|_wv, req| {
+            req.allow();
+            true
+        });
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|_app| {
+            #[cfg(target_os = "linux")]
+            enable_webkit_media_capture(_app);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             set_session,
             get_session,

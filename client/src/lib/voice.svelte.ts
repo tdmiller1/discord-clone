@@ -420,8 +420,19 @@ async function join(channelId: number): Promise<void> {
   // 1. Mic capture — a rejection (denied / no device) aborts the join cleanly.
   try {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch {
-    _error = "microphone permission denied or unavailable";
+  } catch (err) {
+    // Surface the real DOMException so failures are diagnosable. On Linux the
+    // native shell must enable WebKitGTK media-stream + grant the permission
+    // request (see src-tauri/src/lib.rs); otherwise this throws NotFoundError
+    // ("0 devices") even when the OS mic works.
+    const name = (err as { name?: string })?.name;
+    _error =
+      name === "NotAllowedError" || name === "SecurityError"
+        ? "microphone permission denied"
+        : name === "NotFoundError"
+          ? "no microphone available to the app"
+          : `microphone unavailable${name ? ` (${name})` : ""}`;
+    console.error("voice: getUserMedia failed", err);
     _status = "idle";
     micStream = null;
     return;
