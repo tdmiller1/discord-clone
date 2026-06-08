@@ -194,6 +194,23 @@ const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (
         .send({ session: rotated.session, expiresAt: rotated.expiresAt, user: request.user });
     },
   );
+
+  // Mint a single-use invite token for the in-app "invite a friend" button. Any
+  // authenticated member can create one (small, trusted ≤10-user server); it records
+  // the creator and is consumed by POST /api/register exactly like a CLI-minted token
+  // (cli.ts mint-token). Rate-limited like the other auth endpoints. The raw token is
+  // returned once and never stored (only its hash is persisted).
+  app.post(
+    "/api/invites",
+    { preHandler: requireAuth, config: rateLimitConfig },
+    async (request, reply) => {
+      const raw = generateToken();
+      db.prepare(
+        "INSERT INTO invite_tokens (token_hash, created_by, created_at, revoked) VALUES (?, ?, ?, 0)",
+      ).run(hashToken(raw), request.user!.id, Date.now());
+      return reply.code(201).send({ token: raw });
+    },
+  );
 };
 
 export default authRoutes;

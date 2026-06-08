@@ -4,6 +4,7 @@
   import { channelStore } from "./channelStore.svelte";
   import { createChannel, type ChannelErrorCode } from "./channels";
   import { gateway } from "./gateway.svelte";
+  import InviteFriend from "./InviteFriend.svelte";
   import MessagePane from "./MessagePane.svelte";
   import VoicePanel from "./VoicePanel.svelte";
 
@@ -150,6 +151,7 @@
         </li>
       {/each}
     </ul>
+    <InviteFriend />
     <div class="row">
       <button onclick={onLogout}>Log out</button>
     </div>

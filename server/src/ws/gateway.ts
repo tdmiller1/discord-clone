@@ -119,6 +119,21 @@ const wsGateway: FastifyPluginAsync<WsGatewayOptions> = async (
     return { user, channels, members };
   };
 
+  /**
+   * Resolves the userId that owns an SFU participant id by scanning live sockets
+   * (≤10 clients — a linear scan like `broadcastToRoom`). Lets the join-path frames
+   * (`voice.joined.producers`, `voice.new_producer`) carry the peer's userId so the
+   * client resolves a username immediately instead of showing the raw participant
+   * UUID until a `voice.state` (mute/deafen) happens to arrive. Null if no live
+   * socket currently holds it.
+   */
+  const userIdForParticipant = (participantId: string): number | null => {
+    for (const st of sockets.values()) {
+      if (st.participantId === participantId) return st.userId;
+    }
+    return null;
+  };
+
   app.get(WS_PATH, { websocket: true }, (socket: WebSocket) => {
     const state: ConnState = {
       userId: null,
@@ -230,7 +245,9 @@ const wsGateway: FastifyPluginAsync<WsGatewayOptions> = async (
               channelId,
               participantId,
               rtpCapabilities: sfu.getRtpCapabilities(),
-              producers: sfu.listProducers(channelId, participantId),
+              producers: sfu
+                .listProducers(channelId, participantId)
+                .map((p) => ({ ...p, userId: userIdForParticipant(p.participantId) })),
             },
           });
           if (firstInVoice) {
@@ -307,7 +324,7 @@ const wsGateway: FastifyPluginAsync<WsGatewayOptions> = async (
             state.voiceChannelId,
             {
               op: "voice.new_producer",
-              d: { participantId: state.participantId, producerId },
+              d: { participantId: state.participantId, producerId, userId: state.userId },
             },
             socket,
           );

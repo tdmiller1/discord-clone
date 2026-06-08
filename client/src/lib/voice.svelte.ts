@@ -80,12 +80,16 @@ function commitParticipants(): void {
   _participants = [..._participants];
 }
 
-/** Upsert a participant into the reactive list (no-op if already present and unchanged). */
-function upsertParticipant(pid: string): VoiceParticipant {
+/** Upsert a participant into the reactive list. A known `userId` (carried by the join-path
+ * frames) is stored on create and backfilled if the entry was made before it was known, so a
+ * peer resolves to a username immediately instead of showing its raw participant UUID. */
+function upsertParticipant(pid: string, userId: number | null = null): VoiceParticipant {
   let p = _participants.find((x) => x.participantId === pid);
   if (!p) {
-    p = { participantId: pid, userId: null, muted: false, deafened: false };
+    p = { participantId: pid, userId, muted: false, deafened: false };
     _participants = [..._participants, p];
+  } else if (userId !== null && p.userId === null) {
+    p.userId = userId;
   }
   return p;
 }
@@ -154,12 +158,12 @@ function wireTransport(transport: Transport, direction: "send" | "recv"): void {
 /** Consume one remote producer: request → recvTransport.consume → wire <audio> → resume.
  * A voice.consume with no voice.consumer reply (caps-incompatible) is a silent skip — we do
  * NOT await, we react to the frame in handleVoiceFrame. */
-function consumeProducer(peerId: string, producerId: string): void {
+function consumeProducer(peerId: string, producerId: string, userId: number | null = null): void {
   if (device === null) return;
   const list = producersByParticipant.get(peerId) ?? [];
   if (!list.includes(producerId)) list.push(producerId);
   producersByParticipant.set(peerId, list);
-  upsertParticipant(peerId);
+  upsertParticipant(peerId, userId);
   commitParticipants();
   gateway.sendVoice("voice.consume", {
     producerId,
@@ -357,7 +361,7 @@ function handleVoiceFrame(frame: ServerFrame): void {
     case "voice.resumed":
       break; // ack — audio now flows; nothing reactive to update
     case "voice.new_producer":
-      consumeProducer(frame.d.participantId, frame.d.producerId);
+      consumeProducer(frame.d.participantId, frame.d.producerId, frame.d.userId);
       break;
     case "voice.peer_left":
       dropParticipant(frame.d.participantId);
@@ -475,8 +479,8 @@ async function join(channelId: number): Promise<void> {
     startLevelLoop();
 
     // 7. Consume every producer already in the room.
-    for (const { participantId: peerId, producerId } of joined.producers) {
-      consumeProducer(peerId, producerId);
+    for (const { participantId: peerId, producerId, userId } of joined.producers) {
+      consumeProducer(peerId, producerId, userId);
     }
 
     _status = "connected";

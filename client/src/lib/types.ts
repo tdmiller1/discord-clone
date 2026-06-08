@@ -134,7 +134,7 @@ export interface VoiceJoinedPayload {
   channelId: number;
   participantId: string;
   rtpCapabilities: unknown; // → Device.load({ routerRtpCapabilities })
-  producers: { participantId: string; producerId: string }[];
+  producers: { participantId: string; producerId: string; userId: number | null }[];
 }
 
 /** server→client: voice.transport — created transport params → createSend/RecvTransport(...). */
@@ -173,6 +173,7 @@ export interface VoiceResumedPayload {
 export interface VoiceNewProducerPayload {
   participantId: string;
   producerId: string;
+  userId: number | null; // the peer's user id, so the client resolves a username without waiting for voice.state
 }
 
 /** server→client: voice.peer_left — a peer left/disconnected; close its consumer / drop its audio. */

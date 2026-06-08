@@ -105,3 +105,26 @@ export async function logout(serverUrl: string, token: string): Promise<void> {
 export function validateSession(serverUrl: string, token: string): Promise<AuthResult> {
   return post(serverUrl, "/api/refresh", 200, undefined, token);
 }
+
+export type InviteResult =
+  | { ok: true; token: string }
+  | { ok: false; error: AuthErrorCode };
+
+/** POST /api/invites (Bearer) — mint a single-use invite token; success on 201. Returns the
+ * raw token (not a SessionResponse), so it doesn't go through `post`. */
+export async function createInvite(serverUrl: string, token: string): Promise<InviteResult> {
+  let res: Response;
+  try {
+    res = await fetch(new URL("/api/invites", serverUrl), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch {
+    return { ok: false, error: "network" };
+  }
+  const parsed = (await res.json().catch(() => ({}))) as { token?: unknown; error?: unknown };
+  if (res.status === 201 && typeof parsed.token === "string") {
+    return { ok: true, token: parsed.token };
+  }
+  return { ok: false, error: mapError(res.status, parsed.error) };
+}

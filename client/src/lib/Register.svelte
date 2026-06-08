@@ -1,17 +1,25 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { register, type AuthErrorCode } from "./auth";
   import { store } from "./authStore.svelte";
   import { setSession } from "./session";
 
-  let { onAuthed, onShowLogin } = $props<{
+  let { onAuthed, onShowLogin, initialToken = "" } = $props<{
     onAuthed: () => void;
     onShowLogin: () => void;
+    // Prefilled from an invite link (?invite=…); empty for a plain register.
+    initialToken?: string;
   }>();
 
   type Status = "idle" | "submitting" | "error";
 
+  // Seed the editable token field from the invite-link prop once (untrack: capture the
+  // initial value, not a reactive subscription — the prop is a constant from App).
+  const seedToken = untrack(() => initialToken);
+  const prefilled = seedToken.trim() !== "";
+
   let serverUrl = $state(store.serverUrl);
-  let token = $state("");
+  let token = $state(seedToken);
   let username = $state("");
   let password = $state("");
   let status = $state<Status>("idle");
@@ -79,7 +87,11 @@
 
 <main>
   <h1>Create your account</h1>
-  <p class="tagline">Enter your invite token to register.</p>
+  <p class="tagline">
+    {prefilled
+      ? "Invite accepted — pick a username and password."
+      : "Enter your invite token to register."}
+  </p>
 
   <form class="card" onsubmit={submit}>
     <label for="reg-server">Server URL</label>

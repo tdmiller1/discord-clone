@@ -15,12 +15,36 @@
 
   let view = $state<View>("loading");
 
+  /** Capture an invite token from the launch URL (?invite=…), then strip it so a refresh /
+   * relaunch starts clean and the token doesn't linger in the address bar. */
+  function readInviteParam(): string {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get("invite");
+      if (!token) return "";
+      params.delete("invite");
+      const qs = params.toString();
+      window.history.replaceState(
+        null,
+        "",
+        window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash,
+      );
+      return token;
+    } catch {
+      return ""; // no URL access (non-browser) — ignore
+    }
+  }
+
+  // An invite link opens registration with the token prefilled (unless a valid session exists).
+  const invitePrefill = readInviteParam();
+
   /** Launch bootstrap: read the stored token, validate via refresh, route accordingly. */
   async function bootstrap(): Promise<void> {
     const token = await getSession();
     if (!token) {
-      // No stored token: first launch / returning user → login (register affordance shown).
-      view = "login";
+      // No stored token: an invite link opens registration; otherwise login (register
+      // affordance shown).
+      view = invitePrefill ? "register" : "login";
       return;
     }
 
@@ -39,7 +63,7 @@
       store.clear();
     }
     // network or any other failure: keep the token, but don't strand on loading.
-    view = "login";
+    view = invitePrefill ? "register" : "login";
   }
 
   async function handleLogout(): Promise<void> {
@@ -78,7 +102,11 @@
     <p class="tagline">Loading…</p>
   </main>
 {:else if view === "register"}
-  <Register onAuthed={() => (view = "app")} onShowLogin={() => (view = "login")} />
+  <Register
+    initialToken={invitePrefill}
+    onAuthed={() => (view = "app")}
+    onShowLogin={() => (view = "login")}
+  />
 {:else if view === "login"}
   <Login onAuthed={() => (view = "app")} onShowRegister={() => (view = "register")} />
 {:else}
