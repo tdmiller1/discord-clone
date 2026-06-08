@@ -2,6 +2,7 @@
   "name": "discord-clone",
   "version": "0.3.0",
   "private": true,
+  "license": "Unlicense",
   "description": "Self-hosted, no-fluff Discord-server clone. See SPEC.md.",
   "scripts": {
     "dev:server": "npm --prefix server run dev",
