@@ -41,6 +41,15 @@ curl http://localhost:8080/health
 docker compose down            # or: npm run docker:down
 ```
 
+> The root `docker-compose.yml` **pulls the published server image** from GHCR by default. To run
+> the server from your **local source** instead, build and tag it first so Compose picks up your
+> local image rather than pulling:
+>
+> ```bash
+> docker build -t ghcr.io/tdmiller1/discord-clone-server:latest ./server
+> docker compose up -d           # uses the locally-built image (won't re-pull)
+> ```
+
 Config is env-driven — see `server/.env.example` and SPEC.md §12.
 
 ## Client

@@ -25,10 +25,10 @@ Assume very simple architecture, 1 server only needs to support up to 10 clients
 
 Three ways in, depending on who you are:
 
-- **Deploy a public server (recommended) — root `docker-compose.yml`.** Brings up the server, the
-  hosted web client, and a **Cloudflare Tunnel** that publishes both over **HTTPS/WSS** with **no
-  inbound TCP ports** opened and **no TLS certificates to manage**. Voice runs over a **direct UDP
-  port forward** on your router. This is the path the
+- **Deploy a public server (recommended) — root `docker-compose.yml`.** Pulls the published
+  **server image from GHCR**, builds the hosted web client, and runs a **Cloudflare Tunnel** that
+  publishes both over **HTTPS/WSS** with **no inbound TCP ports** opened and **no TLS certificates
+  to manage**. Voice runs over a **direct UDP port forward** on your router. This is the path the
   **[Deploy runbook](#deploy-cloudflare-tunnel--udp-voice-recommended)** below walks through.
 - **Run your own TLS instead (alternative) — `deploy/docker-compose.yml`.** Pulls the published
   GHCR image and fronts it with Caddy (automatic Let's Encrypt) for a domain whose DNS points
@@ -85,6 +85,7 @@ $EDITOR .env
 | `VITE_SERVER_URL` | `https://discord.example.com` | Baked into the hosted web client so it targets the public API by default. |
 | `VITE_APP_URL` | `https://app.example.com` | Baked in so the in-app **"Invite a friend"** button builds shareable links back to the hosted client. |
 | `RTC_EXTRA_ANNOUNCED_IPS` | host's LAN IP *(optional)* | A second ICE candidate so same-LAN clients connect directly instead of hairpinning the public IP. |
+| `SERVER_IMAGE_TAG` | release tag *(optional)* | Which published server image to pull (default `latest`); pin e.g. `0.3.1` for stability. |
 
 `.env` is gitignored — your tunnel token and public IP never get committed.
 
@@ -94,12 +95,16 @@ $EDITOR .env
 docker compose up -d --build      # or: npm run docker:up
 ```
 
-Three services come up: `server` (API/gateway, `:8080`), `web` (hosted client, `:8083`), and
+Three services come up: `server` (the published API/gateway image **pulled from GHCR** — tag
+`SERVER_IMAGE_TAG`, default `latest`), `web` (the hosted client, built locally by `--build`), and
 `cloudflared` (the tunnel). Within ~a minute both hostnames serve over real HTTPS:
 
 ```sh
 curl -sf https://discord.example.com/health     # 200, through the tunnel
 ```
+
+To update later, `docker compose pull && docker compose up -d` grabs the newest released server
+image — or bump `SERVER_IMAGE_TAG` to pin a specific version.
 
 **HTTPS/WSS is required** (SPEC.md §12); the tunnel provides it for free. The client derives
 `wss://discord.example.com/ws` from the `https://` URL automatically — you never enter a separate

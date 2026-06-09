@@ -8,8 +8,9 @@ The **recommended** deployment is the **root `docker-compose.yml`**: `server` + 
 client + a **Cloudflare Tunnel** (`cloudflared`) that publishes both over HTTPS/WSS with no inbound
 TCP ports and no certificates to manage; voice runs over a direct UDP port forward. The `deploy/`
 bundle (`docker-compose.yml`, `.env.example`, `Caddyfile`) is the **alternative** for operators who
-prefer to terminate TLS themselves with Caddy + a domain pointed straight at the host — it pulls the
-published GHCR image instead of building from source.
+prefer to terminate TLS themselves with Caddy + a domain pointed straight at the host. Both bundles
+run the **published GHCR server image** (`SERVER_IMAGE_TAG`, default `latest`); building from source
+is the dev path ([`docs/DEVELOPMENT.md`](DEVELOPMENT.md)).
 
 ## Environment variables
 

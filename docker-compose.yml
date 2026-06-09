@@ -1,7 +1,9 @@
 services:
   server:
-    build: ./server
-    image: discord-clone-server:dev
+    # Pull the published server image from GHCR (the GH repository image) by
+    # default. Override/pin via SERVER_IMAGE_TAG in the root .env. Building from
+    # source is the dev-only path — see docs/DEVELOPMENT.md.
+    image: ghcr.io/tdmiller1/discord-clone-server:${SERVER_IMAGE_TAG:-latest}
     ports:
       - "8080:8080"
       # UDP media range for the SFU (used from M4 onward). Canonical range is
