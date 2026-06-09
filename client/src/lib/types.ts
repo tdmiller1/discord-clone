@@ -6,6 +6,9 @@ export interface PublicUser {
   username: string;
   displayName: string | null;
   createdAt: number;
+  /** Attachment id of the current profile picture, or null. The bytes are fetched
+   * from GET /api/attachments/:id like any inline image (see attachmentImages.ts). */
+  avatarId: number | null;
 }
 
 /** Body returned by POST /api/register, /api/login, and /api/refresh. */
@@ -83,8 +86,8 @@ export interface PresenceUpdatePayload {
   voiceChannelId: number | null; // the voice channel the user is in, or null when not in voice (M4)
 }
 
-/** server→client: op `user.update` — a user changed their profile (username). Merge the
- * new PublicUser into the member map, preserving live presence (status/voiceChannelId). */
+/** server→client: op `user.update` — a user changed their profile (username or avatar).
+ * Merge the new PublicUser into the member map, preserving live presence (status/voiceChannelId). */
 export interface UserUpdatePayload {
   user: PublicUser;
 }

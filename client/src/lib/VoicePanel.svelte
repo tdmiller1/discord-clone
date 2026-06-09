@@ -22,8 +22,6 @@
 
 {#if channel !== null}
   <div class="voice-card">
-    <h2>Voice</h2>
-
     <div class="voice-channel">
       <span class="glyph" aria-hidden="true">🔊</span>
       <span class="vname">{channel.name}</span>
@@ -92,13 +90,6 @@
   .voice-card {
     display: flex;
     flex-direction: column;
-  }
-  h2 {
-    margin: 0 0 0.75rem;
-    font-size: 0.8rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--muted);
   }
   .voice-channel {
     display: flex;

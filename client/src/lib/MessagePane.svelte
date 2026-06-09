@@ -5,6 +5,7 @@
   import { fetchMessages } from "./messages";
   import { uploadAttachment } from "./attachments";
   import type { AttachmentErrorCode } from "./attachments";
+  import Avatar from "./Avatar.svelte";
   import InlineImage from "./InlineImage.svelte";
 
   // Mirrors the server default (server/src/config.ts MAX_MESSAGE_LENGTH). Not exposed over
@@ -33,6 +34,11 @@
   function authorName(id: number): string {
     const m = memberById.get(id);
     return m?.displayName ?? m?.username ?? String(id);
+  }
+
+  // Avatar id for an author (null when unknown / never set → Avatar shows the initial fallback).
+  function authorAvatarId(id: number): number | null {
+    return memberById.get(id)?.avatarId ?? null;
   }
 
   let loadStatus = $state<LoadStatus>("idle");
@@ -211,16 +217,30 @@
       {/if}
 
       <ul class="messages">
-        {#each messages as msg (msg.id)}
-          <li class="message">
-            <span class="author">{authorName(msg.authorId)}</span>
-            <span class="time">{formatTime(msg.createdAt)}</span>
-            {#if msg.content.trim() !== ""}
-              <span class="content">{msg.content}</span>
-            {/if}
-            {#if msg.attachment !== null}
-              <div class="attachment"><InlineImage attachment={msg.attachment} /></div>
-            {/if}
+        {#each messages as msg, i (msg.id)}
+          {@const grouped = i > 0 && messages[i - 1].authorId === msg.authorId}
+          <li class="message" class:grouped>
+            <div class="gutter">
+              {#if grouped}
+                <span class="hover-time">{formatTime(msg.createdAt)}</span>
+              {:else}
+                <Avatar avatarId={authorAvatarId(msg.authorId)} name={authorName(msg.authorId)} size={36} />
+              {/if}
+            </div>
+            <div class="body">
+              {#if !grouped}
+                <div class="meta">
+                  <span class="author">{authorName(msg.authorId)}</span>
+                  <span class="time">{formatTime(msg.createdAt)}</span>
+                </div>
+              {/if}
+              {#if msg.content.trim() !== ""}
+                <span class="content">{msg.content}</span>
+              {/if}
+              {#if msg.attachment !== null}
+                <div class="attachment"><InlineImage attachment={msg.attachment} /></div>
+              {/if}
+            </div>
           </li>
         {/each}
       </ul>
@@ -303,12 +323,41 @@
     margin: 0;
     padding: 0;
   }
+  /* Discord-style row: fixed avatar gutter on the left, message body on the right.
+     Consecutive messages from the same author are "grouped" — they drop the avatar
+     and name, tightening the spacing and showing the timestamp only on hover. */
   .message {
     display: flex;
-    flex-wrap: wrap;
+    gap: 0.6rem;
+    padding: 0.1rem 0;
+  }
+  .message:not(.grouped) {
+    margin-top: 0.6rem;
+  }
+  .gutter {
+    flex: none;
+    width: 36px;
+    display: flex;
+    justify-content: center;
+  }
+  /* Timestamp shown in the gutter on hover for grouped messages (hidden otherwise). */
+  .hover-time {
+    font-size: 0.62rem;
+    color: var(--muted);
+    line-height: 1.4;
+    opacity: 0;
+  }
+  .message.grouped:hover .hover-time {
+    opacity: 1;
+  }
+  .body {
+    flex: 1;
+    min-width: 0;
+  }
+  .meta {
+    display: flex;
     align-items: baseline;
     gap: 0.4rem;
-    padding: 0.3rem 0;
   }
   .author {
     font-weight: 600;
@@ -319,13 +368,13 @@
     color: var(--muted);
   }
   .content {
-    flex-basis: 100%;
+    display: block;
     white-space: pre-wrap;
     word-break: break-word;
     color: var(--text);
   }
   .attachment {
-    flex-basis: 100%;
+    margin-top: 0.15rem;
   }
   .load-older {
     width: 100%;

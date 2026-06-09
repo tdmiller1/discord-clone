@@ -61,9 +61,6 @@
 </div>
 
 <style>
-  .invite {
-    margin-bottom: 0.75rem;
-  }
   .invite-btn {
     width: 100%;
   }

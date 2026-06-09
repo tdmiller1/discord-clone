@@ -13,6 +13,13 @@ export type ChannelErrorCode =
   | "network"
   | "unknown";
 
+/** Mirrors the server rule (server/src/channels.ts normalizeChannelName): trim and
+ * collapse every run of whitespace to a single hyphen so channel names never contain
+ * spaces. Used for live input feedback; the server re-applies it and stays authoritative. */
+export function normalizeChannelName(raw: string): string {
+  return raw.trim().replace(/\s+/g, "-");
+}
+
 export type ChannelResult =
   | { ok: true; data: PublicChannel }
   | { ok: false; error: ChannelErrorCode; status?: number };

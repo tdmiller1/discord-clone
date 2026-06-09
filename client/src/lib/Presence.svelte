@@ -2,11 +2,13 @@
   import { onDestroy, onMount } from "svelte";
   import { store } from "./authStore.svelte";
   import { channelStore } from "./channelStore.svelte";
-  import { createChannel, type ChannelErrorCode } from "./channels";
+  import { createChannel, normalizeChannelName, type ChannelErrorCode } from "./channels";
   import { gateway } from "./gateway.svelte";
+  import Avatar from "./Avatar.svelte";
   import InviteFriend from "./InviteFriend.svelte";
   import MessagePane from "./MessagePane.svelte";
   import Profile from "./Profile.svelte";
+  import { unreadStore } from "./unreadStore.svelte";
   import VoicePanel from "./VoicePanel.svelte";
 
   let { onLogout, onSessionInvalid } = $props<{
@@ -15,6 +17,57 @@
   }>();
 
   type CreateStatus = "idle" | "submitting" | "error";
+
+  // Resizable left rail: users can widen it past the default, capped at RAIL_MAX.
+  // The chosen width is persisted so the layout is remembered across sessions.
+  const RAIL_MIN = 260;
+  const RAIL_MAX = 500;
+  const RAIL_STORAGE_KEY = "railWidth";
+  let railWidth = $state(RAIL_MIN);
+  let resizing = $state(false);
+
+  const clampWidth = (w: number): number => Math.min(RAIL_MAX, Math.max(RAIL_MIN, w));
+
+  function persistWidth(): void {
+    try {
+      localStorage.setItem(RAIL_STORAGE_KEY, String(railWidth));
+    } catch {
+      // Ignore storage failures (private mode / disabled) — width still applies this session.
+    }
+  }
+
+  onMount(() => {
+    const saved = Number(localStorage.getItem(RAIL_STORAGE_KEY));
+    if (Number.isFinite(saved) && saved > 0) railWidth = clampWidth(saved);
+  });
+
+  // The rail starts at viewport x=0, so the pointer's clientX is the target width.
+  function onResizeMove(event: PointerEvent): void {
+    railWidth = clampWidth(event.clientX);
+  }
+
+  function endResize(): void {
+    resizing = false;
+    window.removeEventListener("pointermove", onResizeMove);
+    window.removeEventListener("pointerup", endResize);
+    persistWidth();
+  }
+
+  function startResize(event: PointerEvent): void {
+    event.preventDefault();
+    resizing = true;
+    window.addEventListener("pointermove", onResizeMove);
+    window.addEventListener("pointerup", endResize);
+  }
+
+  // Keyboard support for the separator: arrows nudge by 16px.
+  function onResizeKey(event: KeyboardEvent): void {
+    if (event.key === "ArrowLeft") railWidth = clampWidth(railWidth - 16);
+    else if (event.key === "ArrowRight") railWidth = clampWidth(railWidth + 16);
+    else return;
+    event.preventDefault();
+    persistWidth();
+  }
 
   let newName = $state("");
   let createStatus = $state<CreateStatus>("idle");
@@ -55,7 +108,7 @@
     const result = await createChannel({
       serverUrl: store.serverUrl,
       token: store.sessionToken!,
-      name: newName.trim(),
+      name: normalizeChannelName(newName),
     });
 
     if (result.ok) {
@@ -93,7 +146,11 @@
 
   // Own the socket lifecycle: connect when this view mounts, tear down when it unmounts.
   onMount(() => gateway.connect());
-  onDestroy(() => gateway.disconnect());
+  onDestroy(() => {
+    gateway.disconnect();
+    window.removeEventListener("pointermove", onResizeMove);
+    window.removeEventListener("pointerup", endResize);
+  });
 
   // A 4001 close means the stored session is dead — let App clear it + return to login.
   $effect(() => {
@@ -115,7 +172,7 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="app-shell">
+<div class="app-shell" class:resizing style="--rail-w: {railWidth}px">
   <!-- Left rail: Voice on top, Channels below, with the signed-in line pinned to the
        bottom (just above the fixed version badge). -->
   <nav class="rail">
@@ -140,14 +197,19 @@
       </div>
       <ul class="channels">
         {#each gateway.channels as c (c.id)}
+          {@const unread = unreadStore.count(c.id)}
           <li>
             <button
               type="button"
               class="channel"
               class:active={c.id === channelStore.activeId}
+              class:unread={unread > 0}
               onclick={() => channelStore.select(c.id)}
             >
-              <span class="hash">#</span>{c.name}
+              <span class="hash">#</span><span class="cname">{c.name}</span>
+              {#if unread > 0}
+                <span class="unread-badge" title="{unread} unread">{unread > 99 ? "99+" : unread}</span>
+              {/if}
             </button>
           </li>
         {/each}
@@ -155,12 +217,30 @@
     </section>
 
     <div class="rail-footer">
-      {#if statusLabel}
-        <p class="status" class:connected={gateway.status === "open"}>{statusLabel}</p>
-      {/if}
-      <p class="signed-in">Signed in as {store.currentUser?.username ?? "user"}.</p>
+      <section class="card profile-card">
+        <Profile {onLogout} connected={gateway.status === "open"} status={statusLabel} />
+      </section>
     </div>
   </nav>
+
+  <!-- Drag handle on the rail's right edge: widen the left rail up to 500px.
+       A focusable role="separator" is the correct splitter pattern; the a11y
+       lints below don't recognize it as interactive, so they're suppressed. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div
+    class="rail-resizer"
+    class:active={resizing}
+    role="separator"
+    aria-orientation="vertical"
+    aria-label="Resize sidebar"
+    aria-valuemin={RAIL_MIN}
+    aria-valuemax={RAIL_MAX}
+    aria-valuenow={railWidth}
+    tabindex="0"
+    onpointerdown={startResize}
+    onkeydown={onResizeKey}
+  ></div>
 
   <!-- Center: the channel viewer fills the remaining horizontal space and full height. -->
   <main class="content">
@@ -169,19 +249,21 @@
     </section>
   </main>
 
-  <!-- Right rail: your profile (change username) + members. -->
+  <!-- Right rail: members. -->
   <aside class="members-rail">
-    <section class="card">
-      <Profile />
-    </section>
-
     <section class="card">
       <h2>Members</h2>
       <ul class="members">
         {#each gateway.members as m (m.id)}
           <li class="member">
-            <span class="dot" class:online={m.status === "online"} class:offline={m.status === "offline"}
-            ></span>
+            <span class="member-av" class:offline-av={m.status === "offline"}>
+              <Avatar avatarId={m.avatarId} name={m.username} size={28} />
+              <span
+                class="dot"
+                class:online={m.status === "online"}
+                class:offline={m.status === "offline"}
+              ></span>
+            </span>
             <span class="name" class:offline-name={m.status === "offline"}>
               {m.username}{m.id === selfId ? " (you)" : ""}
             </span>
@@ -191,11 +273,13 @@
           </li>
         {/each}
       </ul>
-      <InviteFriend />
-      <div class="row">
-        <button onclick={onLogout}>Log out</button>
-      </div>
     </section>
+
+    <div class="rail-footer">
+      <section class="card">
+        <InviteFriend />
+      </section>
+    </div>
   </aside>
 </div>
 
@@ -210,6 +294,7 @@
         <input
           bind:this={createInput}
           bind:value={newName}
+          oninput={() => (newName = newName.replace(/\s+/g, "-"))}
           placeholder="new-channel"
           aria-label="New channel name"
         />
@@ -231,10 +316,36 @@
   /* Full-width, full-height app shell: fixed left + right rails flanking a fluid
      center column that holds the channel viewer. */
   .app-shell {
+    position: relative;
     display: grid;
-    grid-template-columns: 260px minmax(0, 1fr) 248px;
+    grid-template-columns: var(--rail-w, 260px) minmax(0, 1fr) 248px;
     height: 100vh;
     width: 100%;
+  }
+  /* While dragging, kill text selection and force the resize cursor everywhere. */
+  .app-shell.resizing {
+    user-select: none;
+    cursor: col-resize;
+  }
+
+  /* Vertical drag handle straddling the rail/content boundary (at --rail-w). */
+  .rail-resizer {
+    position: absolute;
+    top: 0;
+    left: var(--rail-w, 260px);
+    width: 6px;
+    height: 100%;
+    margin-left: -3px;
+    z-index: 5;
+    cursor: col-resize;
+    background: transparent;
+    transition: background 0.12s ease;
+  }
+  .rail-resizer:hover,
+  .rail-resizer:focus-visible,
+  .rail-resizer.active {
+    background: var(--accent);
+    outline: none;
   }
 
   /* Cards inside the shell drop the global top margin — the rails space them with
@@ -259,10 +370,8 @@
     /* Sit just above the fixed version badge (App.svelte, bottom: 6px). */
     padding-bottom: 1.25rem;
   }
-  .signed-in {
-    color: var(--muted);
-    font-size: 0.85rem;
-    margin: 0.25rem 0 0;
+  .profile-card {
+    margin-bottom: 0.5rem;
   }
 
   /* Center: the channel viewer fills the remaining width and full height. Overrides
@@ -308,16 +417,12 @@
     .pane-card {
       min-height: 24rem;
     }
+    /* Single-column stacked layout has no rail boundary to drag. */
+    .rail-resizer {
+      display: none;
+    }
   }
 
-  .status {
-    color: var(--muted);
-    font-size: 0.85rem;
-    margin: 0.5rem 0 0;
-  }
-  .status.connected {
-    color: var(--ok);
-  }
   h2 {
     margin: 0 0 0.75rem;
     font-size: 0.8rem;
@@ -336,11 +441,24 @@
     gap: 0.6rem;
     padding: 0.4rem 0;
   }
+  /* Avatar + a status dot badged on its bottom-right corner. */
+  .member-av {
+    position: relative;
+    flex: none;
+    line-height: 0;
+  }
+  .offline-av {
+    opacity: 0.55;
+  }
   .dot {
+    position: absolute;
+    right: -1px;
+    bottom: -1px;
     width: 0.6rem;
     height: 0.6rem;
     border-radius: 50%;
-    flex: none;
+    /* Ring in the rail background so the dot reads as a badge over the avatar. */
+    box-shadow: 0 0 0 2px var(--surface);
   }
   .dot.online {
     background: var(--ok);
@@ -365,6 +483,8 @@
   }
   .channel {
     width: 100%;
+    display: flex;
+    align-items: center;
     text-align: left;
     background: none;
     color: var(--muted);
@@ -379,12 +499,42 @@
     background: var(--accent);
     color: var(--text);
   }
+  .cname {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* Unread channels read brighter + bolder, mirroring Discord's "white channel name". */
+  .channel.unread {
+    color: var(--text);
+    font-weight: 600;
+  }
   .hash {
     color: var(--muted);
     margin-right: 0.25rem;
   }
-  .channel.active .hash {
+  .channel.active .hash,
+  .channel.unread .hash {
     color: var(--text);
+  }
+  /* Count pill pinned to the right edge of the channel row. */
+  .unread-badge {
+    flex: none;
+    margin-left: 0.4rem;
+    min-width: 1.1rem;
+    padding: 0 0.35rem;
+    height: 1.1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--err, #f23f43);
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1;
+    border-radius: 0.55rem;
   }
   .err {
     color: var(--err, #f87171);

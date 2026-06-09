@@ -11,6 +11,9 @@
   import { clearCache as clearAttachmentImages } from "./lib/attachmentImages";
   import { voice } from "./lib/voice.svelte";
   import { startAutoUpdate } from "./lib/updater.svelte";
+  // Side-effect import: applies any persisted color overrides before first paint,
+  // so they take effect on the login/loading screens too (not just inside the app).
+  import "./lib/themeStore.svelte";
 
   type View = "loading" | "register" | "login" | "app";
 

@@ -161,3 +161,66 @@ export async function updateUsername(args: {
   }
   return { ok: false, error: mapError(res.status, parsed.error) };
 }
+
+/** Avatar-specific error codes (a superset-ish of the image-upload contract): the
+ * upload can be rejected for size/format reasons the username PATCH never sees. */
+export type AvatarErrorCode =
+  | "file_too_large"
+  | "invalid_image"
+  | "no_file"
+  | "rate_limited"
+  | "unauthorized"
+  | "network"
+  | "unknown";
+
+export type UpdateAvatarResult =
+  | { ok: true; user: PublicUser }
+  | { ok: false; error: AvatarErrorCode };
+
+/** Maps an HTTP status + body.error from the avatar endpoint to an AvatarErrorCode. */
+function mapAvatarError(status: number, bodyError: unknown): AvatarErrorCode {
+  if (status === 429) return "rate_limited";
+  if (status === 401) return "unauthorized";
+  if (status === 413) return "file_too_large";
+  if (status === 400) {
+    if (bodyError === "invalid_image") return "invalid_image";
+    if (bodyError === "no_file") return "no_file";
+    return "invalid_image"; // not_multipart / bad_request — surface as a format problem
+  }
+  return "unknown";
+}
+
+/**
+ * PATCH /api/users/me/avatar (Bearer) — set/replace the signed-in user's profile
+ * picture. multipart/form-data with a single `file` part; NO Content-Type header so
+ * the browser supplies the boundary (mirrors attachments.ts). Returns the updated
+ * PublicUser (with the new `avatarId`) on 200; every other client refreshes via the
+ * server's `user.update` broadcast. The session/token is unaffected.
+ */
+export async function updateAvatar(args: {
+  serverUrl: string;
+  token: string;
+  file: File;
+}): Promise<UpdateAvatarResult> {
+  const { serverUrl, token, file } = args;
+
+  const form = new FormData();
+  form.append("file", file);
+
+  let res: Response;
+  try {
+    res = await fetch(new URL("/api/users/me/avatar", serverUrl), {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+  } catch {
+    return { ok: false, error: "network" };
+  }
+
+  const parsed = (await res.json().catch(() => ({}))) as { user?: unknown; error?: unknown };
+  if (res.status === 200 && parsed.user !== undefined) {
+    return { ok: true, user: parsed.user as PublicUser };
+  }
+  return { ok: false, error: mapAvatarError(res.status, parsed.error) };
+}
