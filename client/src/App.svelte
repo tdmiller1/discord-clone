@@ -16,6 +16,10 @@
 
   let view = $state<View>("loading");
 
+  // Build-time client version (injected from package.json by vite define), shown
+  // pinned in the bottom-left corner on every view.
+  const appVersion = __APP_VERSION__;
+
   /** Capture an invite token from the launch URL (?invite=…), then strip it so a refresh /
    * relaunch starts clean and the token doesn't linger in the address bar. */
   function readInviteParam(): string {
@@ -114,3 +118,22 @@
 {:else}
   <Presence onLogout={handleLogout} onSessionInvalid={handleSessionInvalid} />
 {/if}
+
+<span class="app-version">v{appVersion}</span>
+
+<style>
+  /* Subtle, always-on build badge pinned to the bottom-left corner. Non-interactive
+     so it never intercepts clicks on whatever view is mounted. */
+  .app-version {
+    position: fixed;
+    bottom: 6px;
+    left: 8px;
+    font-size: 11px;
+    line-height: 1;
+    color: var(--muted);
+    opacity: 0.55;
+    pointer-events: none;
+    user-select: none;
+    z-index: 1000;
+  }
+</style>
