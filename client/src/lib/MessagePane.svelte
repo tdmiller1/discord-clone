@@ -5,6 +5,7 @@
   import { fetchMessages } from "./messages";
   import { uploadAttachment } from "./attachments";
   import type { AttachmentErrorCode } from "./attachments";
+  import type { PublicMessage } from "./types";
   import Avatar from "./Avatar.svelte";
   import InlineImage from "./InlineImage.svelte";
 
@@ -30,6 +31,8 @@
     channelStore.activeId === null ? [] : gateway.messagesFor(channelStore.activeId),
   );
   const memberById = $derived(new Map(gateway.members.map((m) => [m.id, m])));
+  // The logged-in user's id — only their own messages expose the edit affordance.
+  const currentUserId = $derived(store.currentUser?.id ?? null);
 
   function authorName(id: number): string {
     const m = memberById.get(id);
@@ -45,6 +48,10 @@
   let loadErr = $state("");
   let hasMore = $state(false);
   let loadingOlder = $state(false);
+
+  // The message currently being edited inline (id), and its working text. `null` = not editing.
+  let editingId = $state<number | null>(null);
+  let editDraft = $state("");
 
   let draft = $state("");
   let pendingFile = $state<File | null>(null);
@@ -193,6 +200,48 @@
   function formatTime(ms: number): string {
     return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
+
+  function startEdit(msg: PublicMessage): void {
+    editingId = msg.id;
+    editDraft = msg.content;
+  }
+
+  function cancelEdit(): void {
+    editingId = null;
+    editDraft = "";
+  }
+
+  // Commit the edit over the WS. The authoritative row (with editedAt set) arrives on the
+  // message.update broadcast, so we just close the editor — no optimistic mutation.
+  function saveEdit(msg: PublicMessage): void {
+    const trimmed = editDraft.trim();
+    // Unchanged → nothing to send; just close. Blank text on a text-only message is
+    // rejected by the server (and pointless), so keep the editor open instead.
+    if (trimmed === msg.content) {
+      cancelEdit();
+      return;
+    }
+    if (trimmed === "" && msg.attachment === null) return;
+    gateway.editMessage(msg.id, trimmed);
+    cancelEdit();
+  }
+
+  function onEditKeydown(event: KeyboardEvent, msg: PublicMessage): void {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelEdit();
+    } else if (event.key === "Enter" && !event.shiftKey) {
+      // Enter saves; Shift+Enter inserts a newline (the textarea's default).
+      event.preventDefault();
+      saveEdit(msg);
+    }
+  }
+
+  // Focus + place the caret at the end when an edit textarea mounts.
+  function autofocusEnd(node: HTMLTextAreaElement) {
+    node.focus();
+    node.setSelectionRange(node.value.length, node.value.length);
+  }
 </script>
 
 <section class="pane">
@@ -234,13 +283,47 @@
                   <span class="time">{formatTime(msg.createdAt)}</span>
                 </div>
               {/if}
-              {#if msg.content.trim() !== ""}
-                <span class="content">{msg.content}</span>
-              {/if}
-              {#if msg.attachment !== null}
-                <div class="attachment"><InlineImage attachment={msg.attachment} /></div>
+              {#if editingId === msg.id}
+                <div class="edit">
+                  <textarea
+                    class="edit-input"
+                    bind:value={editDraft}
+                    maxlength={MAX_MESSAGE_LENGTH}
+                    onkeydown={(e) => onEditKeydown(e, msg)}
+                    use:autofocusEnd
+                  ></textarea>
+                  <div class="edit-hint">
+                    escape to <button type="button" class="link" onclick={cancelEdit}>cancel</button>
+                    • enter to <button type="button" class="link" onclick={() => saveEdit(msg)}>save</button>
+                  </div>
+                </div>
+              {:else}
+                {#if msg.content.trim() !== ""}
+                  <span class="content"
+                    >{msg.content}{#if msg.editedAt !== null}<span
+                        class="edited"
+                        title={`edited ${new Date(msg.editedAt).toLocaleString()}`}>(edited)</span
+                      >{/if}</span
+                  >
+                {/if}
+                {#if msg.attachment !== null}
+                  <div class="attachment"><InlineImage attachment={msg.attachment} /></div>
+                {/if}
               {/if}
             </div>
+            {#if msg.authorId === currentUserId && editingId !== msg.id}
+              <div class="actions">
+                <button
+                  type="button"
+                  class="action"
+                  aria-label="Edit message"
+                  title="Edit"
+                  onclick={() => startEdit(msg)}
+                >
+                  Edit
+                </button>
+              </div>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -330,6 +413,11 @@
     display: flex;
     gap: 0.6rem;
     padding: 0.1rem 0;
+    position: relative;
+  }
+  /* Subtle row highlight on hover, like Discord, anchoring the floating actions. */
+  .message:hover {
+    background: var(--hover, rgba(255, 255, 255, 0.03));
   }
   .message:not(.grouped) {
     margin-top: 0.6rem;
@@ -373,8 +461,64 @@
     word-break: break-word;
     color: var(--text);
   }
+  /* Inline "(edited)" marker trailing the content (Discord-style). */
+  .edited {
+    margin-left: 0.35rem;
+    font-size: 0.62rem;
+    color: var(--muted);
+    user-select: none;
+  }
   .attachment {
     margin-top: 0.15rem;
+  }
+  /* Floating per-message action toolbar, revealed on row hover (own messages only). */
+  .actions {
+    position: absolute;
+    top: -0.6rem;
+    right: 0.25rem;
+    display: none;
+    background: var(--surface, #1e1f22);
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+    border-radius: 4px;
+  }
+  .message:hover .actions {
+    display: flex;
+  }
+  .action {
+    background: none;
+    color: var(--muted);
+    font-size: 0.72rem;
+    padding: 0.15rem 0.4rem;
+  }
+  .action:hover {
+    color: var(--text);
+  }
+  /* Inline edit textarea + keyboard hint. */
+  .edit {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .edit-input {
+    width: 100%;
+    min-height: 2.2rem;
+    resize: vertical;
+    font: inherit;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .edit-hint {
+    font-size: 0.7rem;
+    color: var(--muted);
+  }
+  .edit-hint .link {
+    background: none;
+    padding: 0;
+    color: var(--accent, #5865f2);
+    font-size: inherit;
+  }
+  .edit-hint .link:hover {
+    text-decoration: underline;
   }
   .load-older {
     width: 100%;

@@ -157,7 +157,7 @@ type MessageJoinRow = MessageRow & {
 };
 
 const MESSAGE_JOIN_COLUMNS =
-  "m.id, m.channel_id, m.author_id, m.content, m.attachment_id, m.created_at, " +
+  "m.id, m.channel_id, m.author_id, m.content, m.attachment_id, m.created_at, m.edited_at, " +
   "a.id AS a_id, a.message_id AS a_message_id, a.uploader_id AS a_uploader_id, " +
   "a.filename AS a_filename, a.content_type AS a_content_type, a.size AS a_size, " +
   "a.width AS a_width, a.height AS a_height, a.path AS a_path, a.created_at AS a_created_at";
@@ -171,6 +171,7 @@ function splitMessageRow(raw: MessageJoinRow): MessageWithAttachment {
     content: raw.content,
     attachment_id: raw.attachment_id,
     created_at: raw.created_at,
+    edited_at: raw.edited_at,
   };
   const attachment: AttachmentRow | null =
     raw.a_id === null
@@ -236,6 +237,27 @@ export function getMessageWithAttachment(
     )
     .get(id) as MessageJoinRow | undefined;
   return raw === undefined ? undefined : splitMessageRow(raw);
+}
+
+/**
+ * Updates a message's text content and stamps `edited_at = Date.now()`, returning
+ * the persisted `MessageRow` (or `undefined` if the id no longer exists). Ownership
+ * (`author_id === editor`) is the caller's responsibility — this accessor only writes.
+ * The attachment is untouched: edits change text only (parity with {@link insertMessage}).
+ */
+export function updateMessageContent(
+  db: Db,
+  id: number,
+  content: string,
+): MessageRow | undefined {
+  db.prepare("UPDATE messages SET content = ?, edited_at = ? WHERE id = ?").run(
+    content,
+    Date.now(),
+    id,
+  );
+  return db.prepare("SELECT * FROM messages WHERE id = ?").get(id) as
+    | MessageRow
+    | undefined;
 }
 
 /**

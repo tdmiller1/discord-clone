@@ -33,7 +33,7 @@ Core features:
 **Non-goals (v1)** — explicitly out of scope to keep it simple:
 - Federation / multiple servers / server discovery.
 - Roles & granular permissions (one flat member role + one admin).
-- DMs, threads, reactions, replies, edits/deletes history, search.
+- DMs, threads, reactions, replies, deletes history, search. (Authors **can** edit their own message text — see §7/§9 — but there is no edit *history*; only the latest text and an `edited_at` stamp are kept.)
 - Screen share, video, voice for >1 channel concurrently is allowed but not a priority.
 - Mobile/web clients (desktop only per README).
 
@@ -116,6 +116,7 @@ JSON envelope: `{ "op": "<event>", "d": { ... } }`. Client authenticates on conn
 |--------------------|---------|---------|
 | `ready` | user, channels, members | initial state after auth |
 | `message.create` | message | new message in a channel |
+| `message.update` | message | a message's text was edited |
 | `channel.create` | channel | a channel was created |
 | `presence.update` | userId, status, voiceChannelId | online/offline / joined-left voice |
 | `voice.signal` | from, sdp/ice | SFU negotiation relayed |
@@ -123,6 +124,7 @@ JSON envelope: `{ "op": "<event>", "d": { ... } }`. Client authenticates on conn
 | op (client→server) | payload | meaning |
 |--------------------|---------|---------|
 | `message.send` | channelId, content, attachmentId? | post a message |
+| `message.edit` | messageId, content | edit your own message's text |
 | `voice.join` / `voice.leave` | channelId | enter/leave the voice channel |
 | `voice.signal` | sdp/ice | negotiation |
 | `voice.state` | muted, deafened | self mute/deafen |
@@ -135,7 +137,7 @@ JSON envelope: `{ "op": "<event>", "d": { ... } }`. Client authenticates on conn
 - **invite_tokens**: `id, token_hash, created_by, created_at, used_by NULL, used_at NULL, revoked`
 - **sessions**: `id, user_id, token_hash, created_at, expires_at, revoked`
 - **channels**: `id, name, type (text|voice), position, created_by, created_at`
-- **messages**: `id, channel_id, author_id, content, attachment_id NULL, created_at`
+- **messages**: `id, channel_id, author_id, content, attachment_id NULL, created_at, edited_at NULL`
 - **attachments**: `id, message_id NULL, uploader_id, filename, content_type, size, width, height, path, created_at`
 
 ## 9. Text channels & messages
@@ -143,6 +145,7 @@ JSON envelope: `{ "op": "<event>", "d": { ... } }`. Client authenticates on conn
 - Any member can create a text channel (`POST /api/channels {name, type:"text"}`) → broadcast `channel.create`.
 - Channel names are normalized server-side: trimmed, with each run of whitespace collapsed to a single `-` (no spaces). The client mirrors this live in the create field; the server stays authoritative.
 - Send: `message.send` over WS → persisted → broadcast `message.create` to channel members.
+- Edit: `message.edit {messageId, content}` over WS → server checks the editor is the **author**, updates `content` + stamps `edited_at` → broadcast `message.update` (full message) to all. Editing to empty text is allowed only when the message still carries an attachment. Clients show an `(edited)` marker when `edited_at` is set.
 - History: `GET /api/channels/:id/messages?before=<cursor>&limit=50` (keyset pagination on `id`).
 - Ordering by server-assigned monotonic `id`/`created_at`. Plain text content in v1 (no markdown/mentions).
 

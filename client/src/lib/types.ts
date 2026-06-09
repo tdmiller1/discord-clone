@@ -67,6 +67,7 @@ export interface PublicMessage {
   content: string;
   attachment: PublicAttachment | null;
   createdAt: number; // epoch ms
+  editedAt: number | null; // epoch ms of the last content edit, or null if never edited
 }
 
 /** server→client: op `channel.create` (broadcast on POST /api/channels, story 002/003). */
@@ -76,6 +77,12 @@ export interface ChannelCreatePayload {
 
 /** server→client: op `message.create` (broadcast to all authed sockets, story 002). */
 export interface MessageCreatePayload {
+  message: PublicMessage;
+}
+
+/** server→client: op `message.update` — a message's content was edited (broadcast to all).
+ * Carries the full message so clients replace it in place via upsert-by-id. */
+export interface MessageUpdatePayload {
   message: PublicMessage;
 }
 
@@ -217,6 +224,7 @@ export type ServerFrame =
   | Envelope<"user.update", UserUpdatePayload>
   | Envelope<"channel.create", ChannelCreatePayload>
   | Envelope<"message.create", MessageCreatePayload>
+  | Envelope<"message.update", MessageUpdatePayload>
   | Envelope<"voice.joined", VoiceJoinedPayload>
   | Envelope<"voice.transport", VoiceTransportPayload>
   | Envelope<"voice.connected", VoiceConnectedPayload>

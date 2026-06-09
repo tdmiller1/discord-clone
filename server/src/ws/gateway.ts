@@ -10,6 +10,7 @@ import {
   getVoiceChannel,
   insertMessage,
   listChannels,
+  updateMessageContent,
 } from "../channels.js";
 import type { Config } from "../config.js";
 import {
@@ -527,6 +528,41 @@ const wsGateway: FastifyPluginAsync<WsGatewayOptions> = async (
         void handleVoice(op, d).catch((err: unknown) => {
           app.log.error(err);
           send({ op: "voice.error", d: { op, message: "voice operation failed" } });
+        });
+        return;
+      }
+
+      // `message.edit` — the author rewrites their own message's text. Validate the
+      // payload, enforce ownership, then re-broadcast the row as `message.update` so
+      // every client (incl. the editor) replaces it in place via upsert-by-id.
+      if (op === "message.edit") {
+        const d = (frame as { d?: unknown }).d;
+        if (typeof d !== "object" || d === null) return;
+        const messageId = (d as { messageId?: unknown }).messageId;
+        if (
+          typeof messageId !== "number" ||
+          !Number.isInteger(messageId) ||
+          messageId <= 0
+        ) {
+          return;
+        }
+        const content = (d as { content?: unknown }).content;
+        if (typeof content !== "string") return;
+        if (content.length > config.maxMessageLength) return;
+        const existing = getMessageWithAttachment(db, messageId);
+        if (!existing) return;
+        // Authors may only edit their OWN messages (the core ownership gate).
+        if (existing.message.author_id !== state.userId) return;
+        const trimmed = content.trim();
+        // Empty content is only allowed when an attachment still carries the message
+        // (mirrors the image-only rule in `message.send`); never blank out a text post.
+        if (trimmed.length === 0 && existing.attachment === null) return;
+        updateMessageContent(db, messageId, content);
+        const result = getMessageWithAttachment(db, messageId);
+        if (!result) return;
+        hub.broadcast({
+          op: "message.update",
+          d: { message: toPublicMessage(result.message, result.attachment) },
         });
         return;
       }

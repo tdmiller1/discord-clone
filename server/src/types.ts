@@ -51,6 +51,7 @@ export interface MessageRow {
   content: string;
   attachment_id: number | null;
   created_at: number;
+  edited_at: number | null; // epoch ms of last content edit, or null if never edited
 }
 
 export interface AttachmentRow {
@@ -146,6 +147,8 @@ export interface PublicMessage {
   content: string;
   attachment: PublicAttachment | null;
   createdAt: number;
+  /** Epoch ms of the last content edit, or null if the message was never edited. */
+  editedAt: number | null;
 }
 
 export function toPublicMessage(
@@ -159,6 +162,7 @@ export function toPublicMessage(
     content: row.content,
     attachment: attachment ? toPublicAttachment(attachment) : null,
     createdAt: row.created_at,
+    editedAt: row.edited_at,
   };
 }
 
@@ -214,6 +218,17 @@ export interface MessageSendPayload {
 
 /** server→client: op `message.create` (broadcast to all sockets, incl. the sender). */
 export interface MessageCreatePayload {
+  message: PublicMessage;
+}
+
+/** client→server: op `message.edit` — the author updates their own message's text. */
+export interface MessageEditPayload {
+  messageId: number;
+  content: string;
+}
+
+/** server→client: op `message.update` — a message's content was edited (broadcast to all). */
+export interface MessageUpdatePayload {
   message: PublicMessage;
 }
 
@@ -343,6 +358,7 @@ export type ServerEvent =
   | Envelope<"presence.update", PresenceUpdatePayload>
   | Envelope<"user.update", UserUpdatePayload>
   | Envelope<"message.create", MessageCreatePayload>
+  | Envelope<"message.update", MessageUpdatePayload>
   | Envelope<"channel.create", ChannelCreatePayload>
   | Envelope<"voice.joined", VoiceJoinedPayload>
   | Envelope<"voice.transport", VoiceTransportPayload>
@@ -359,6 +375,7 @@ export type ServerEvent =
 export type ClientCommand =
   | Envelope<"identify", IdentifyPayload>
   | Envelope<"message.send", MessageSendPayload>
+  | Envelope<"message.edit", MessageEditPayload>
   | Envelope<"voice.join", VoiceJoinPayload>
   | Envelope<"voice.transport", VoiceTransportRequestPayload>
   | Envelope<"voice.connect", VoiceConnectPayload>

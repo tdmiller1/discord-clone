@@ -70,6 +70,10 @@ CREATE TABLE IF NOT EXISTS messages (
   -- enforced in the accessor/gateway layer (link-once + ownership checks).
   attachment_id INTEGER,
   created_at INTEGER NOT NULL,
+  -- edited_at: epoch ms of the last content edit, or NULL if never edited. A
+  -- pre-existing M2 database lacks this column, so migrate() backfills it via
+  -- ALTER TABLE (additive, no constraint — same pattern as avatar_attachment_id).
+  edited_at INTEGER,
   FOREIGN KEY (channel_id) REFERENCES channels(id),
   FOREIGN KEY (author_id) REFERENCES users(id),
   FOREIGN KEY (attachment_id) REFERENCES attachments(id)
@@ -113,6 +117,10 @@ function migrate(db: Database): void {
   if (!columnExists(db, "users", "avatar_attachment_id")) {
     // Default NULL — required for ALTER TABLE ... ADD COLUMN with a REFERENCES clause.
     db.exec("ALTER TABLE users ADD COLUMN avatar_attachment_id INTEGER REFERENCES attachments(id)");
+  }
+  if (!columnExists(db, "messages", "edited_at")) {
+    // Nullable, defaults NULL — existing rows are "never edited".
+    db.exec("ALTER TABLE messages ADD COLUMN edited_at INTEGER");
   }
 }
 

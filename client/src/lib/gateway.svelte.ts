@@ -140,6 +140,11 @@ function handleFrame(frame: ServerFrame): void {
       upsertMessage(frame.d.message.channelId, frame.d.message);
       break;
     }
+    case "message.update": {
+      // An edit — same upsert-by-id path replaces the cached row in place.
+      upsertMessage(frame.d.message.channelId, frame.d.message);
+      break;
+    }
     default:
       // Route voice.* frames to the voice engine if it has registered (single /ws socket);
       // any other unknown op is ignored.
@@ -295,6 +300,14 @@ export const gateway = {
     };
     if (Number.isInteger(attachmentId) && attachmentId! > 0) d.attachmentId = attachmentId;
     socket.send(JSON.stringify({ op: "message.send", d }));
+  },
+
+  /** Edit one of the user's own messages. Fire-and-forget — the server enforces ownership
+   * and broadcasts message.update back, so the edited row renders via the same upsert path
+   * (no optimistic mutation). A no-op if the socket is not open. */
+  editMessage(messageId: number, content: string): void {
+    if (socket === null || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify({ op: "message.edit", d: { messageId, content } }));
   },
 
   /** Send a voice.* op over the existing gateway socket (the voice engine's only send path —
