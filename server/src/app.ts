@@ -4,6 +4,7 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import multipart from "@fastify/multipart";
 import { mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { type Config, imagesDir } from "./config.js";
 import { openDatabase, type Db } from "./db.js";
 import { seedVoiceChannel } from "./channels.js";
@@ -16,6 +17,15 @@ import { BroadcastHub } from "./ws/hub.js";
 import { VoiceRegistry } from "./ws/voice-registry.js";
 import { VoiceSfu } from "./voice/sfu.js";
 import type { Envelope, PublicUser, SessionRow } from "./types.js";
+
+// Read our own version from package.json so GET / reports the running release
+// accurately (a hardcoded string drifts on every bump). `createRequire` keeps the
+// JSON out of the tsc program (rootDir is `src`, package.json is its parent) and
+// resolves correctly both in dev (src/app.ts → server/package.json) and in the
+// built image (dist/app.js → /app/package.json — both copied into the runtime stage).
+const { version: SERVER_VERSION } = createRequire(import.meta.url)(
+  "../package.json",
+) as { version: string };
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -130,7 +140,7 @@ export async function buildApp(config: Config): Promise<FastifyInstance> {
 
   app.get("/", async () => ({
     name: "discord-clone-server",
-    version: "0.3.1",
+    version: SERVER_VERSION,
     docs: "See SPEC.md",
   }));
 
