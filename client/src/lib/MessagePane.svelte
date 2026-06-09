@@ -54,8 +54,13 @@
   // while the user is at (or near) the bottom; scrolling up to read history or
   // load older messages unpins so incoming messages don't yank the view down.
   let historyEl = $state<HTMLDivElement | null>(null);
+  let messagesEl = $state<HTMLUListElement | null>(null);
   let pinned = $state(true);
   const PIN_THRESHOLD = 80; // px from the bottom still counts as "at the bottom"
+
+  function scrollToBottom(): void {
+    if (historyEl) historyEl.scrollTop = historyEl.scrollHeight;
+  }
 
   function onHistoryScroll(): void {
     if (!historyEl) return;
@@ -70,13 +75,26 @@
   });
 
   // After messages render (channel switch or a new arrival), stick to the bottom
-  // while pinned. `loadingOlder` guards the prepend path, which must not scroll.
+  // while pinned. Track `activeId` too so switching between two channels that
+  // happen to have the same message count still re-fires (length alone wouldn't
+  // change). `loadingOlder` guards the prepend path, which must not scroll.
   $effect(() => {
+    channelStore.activeId;
     void messages.length;
     if (!pinned || loadingOlder) return;
-    void tick().then(() => {
-      if (historyEl) historyEl.scrollTop = historyEl.scrollHeight;
+    void tick().then(scrollToBottom);
+  });
+
+  // Inline images decode AFTER the scroll above runs, growing the list and
+  // stranding the view above the newest message. A ResizeObserver re-pins to the
+  // bottom on any late size change (image load, font swap) while still pinned.
+  $effect(() => {
+    if (!messagesEl) return;
+    const observer = new ResizeObserver(() => {
+      if (pinned && !loadingOlder) scrollToBottom();
     });
+    observer.observe(messagesEl);
+    return () => observer.disconnect();
   });
 
   // The message currently being edited inline (id), and its working text. `null` = not editing.
@@ -295,7 +313,7 @@
         <p class="hint">No messages yet. Say something!</p>
       {/if}
 
-      <ul class="messages">
+      <ul class="messages" bind:this={messagesEl}>
         {#each messages as msg, i (msg.id)}
           {@const grouped = i > 0 && messages[i - 1].authorId === msg.authorId}
           <li class="message" class:grouped>
