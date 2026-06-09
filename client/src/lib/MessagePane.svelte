@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { store } from "./authStore.svelte";
   import { channelStore } from "./channelStore.svelte";
   import { gateway } from "./gateway.svelte";
@@ -48,6 +49,35 @@
   let loadErr = $state("");
   let hasMore = $state(false);
   let loadingOlder = $state(false);
+
+  // Auto-scroll: keep the view pinned to the newest message. `pinned` stays true
+  // while the user is at (or near) the bottom; scrolling up to read history or
+  // load older messages unpins so incoming messages don't yank the view down.
+  let historyEl = $state<HTMLDivElement | null>(null);
+  let pinned = $state(true);
+  const PIN_THRESHOLD = 80; // px from the bottom still counts as "at the bottom"
+
+  function onHistoryScroll(): void {
+    if (!historyEl) return;
+    const distance = historyEl.scrollHeight - historyEl.scrollTop - historyEl.clientHeight;
+    pinned = distance < PIN_THRESHOLD;
+  }
+
+  // Switching channels re-pins to the latest message of the new channel.
+  $effect(() => {
+    channelStore.activeId;
+    pinned = true;
+  });
+
+  // After messages render (channel switch or a new arrival), stick to the bottom
+  // while pinned. `loadingOlder` guards the prepend path, which must not scroll.
+  $effect(() => {
+    void messages.length;
+    if (!pinned || loadingOlder) return;
+    void tick().then(() => {
+      if (historyEl) historyEl.scrollTop = historyEl.scrollHeight;
+    });
+  });
 
   // The message currently being edited inline (id), and its working text. `null` = not editing.
   let editingId = $state<number | null>(null);
@@ -250,7 +280,7 @@
   {:else}
     <h2><span class="hash">#</span>{activeChannel.name}</h2>
 
-    <div class="history">
+    <div class="history" bind:this={historyEl} onscroll={onHistoryScroll}>
       {#if hasMore}
         <button type="button" class="load-older" onclick={loadOlder} disabled={loadingOlder}>
           {loadingOlder ? "Loading…" : "Load older messages"}

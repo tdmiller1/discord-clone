@@ -69,6 +69,33 @@
     persistWidth();
   }
 
+  // --- Responsive layout ---------------------------------------------------
+  // On narrow screens (phones) the three-column desktop layout collapses to a
+  // single full-height chat column; the rails (voice, channels, profile,
+  // members, invite) move into a slide-in drawer toggled from the top bar.
+  // MOBILE_BREAKPOINT matches the CSS `.mobile` rules below.
+  const MOBILE_BREAKPOINT = 900;
+  let viewportWidth = $state(typeof window === "undefined" ? 1200 : window.innerWidth);
+  const isMobile = $derived(viewportWidth <= MOBILE_BREAKPOINT);
+  let drawerOpen = $state(false);
+
+  function onViewportResize(): void {
+    viewportWidth = window.innerWidth;
+  }
+  onMount(() => window.addEventListener("resize", onViewportResize));
+  onDestroy(() => window.removeEventListener("resize", onViewportResize));
+
+  // Active channel — used for the mobile top-bar title.
+  const activeChannel = $derived(
+    gateway.channels.find((c) => c.id === channelStore.activeId) ?? null,
+  );
+
+  // Selecting a channel from the drawer reveals the chat it opened.
+  function selectChannel(id: number): void {
+    channelStore.select(id);
+    drawerOpen = false;
+  }
+
   let newName = $state("");
   let createStatus = $state<CreateStatus>("idle");
   let createErr = $state("");
@@ -136,7 +163,9 @@
   }
 
   function onKeydown(event: KeyboardEvent): void {
-    if (event.key === "Escape" && showCreate) closeCreate();
+    if (event.key !== "Escape") return;
+    if (showCreate) closeCreate();
+    else if (drawerOpen) drawerOpen = false;
   }
 
   // Focus the name field as soon as the modal mounts.
@@ -172,7 +201,36 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="app-shell" class:resizing style="--rail-w: {railWidth}px">
+<div
+  class="app-shell"
+  class:resizing
+  class:mobile={isMobile}
+  class:drawer-open={drawerOpen}
+  style="--rail-w: {railWidth}px"
+>
+  <!-- Mobile only: top bar with a hamburger toggle and the active channel name.
+       The hamburger opens/closes the full-view drawer holding the rails. -->
+  {#if isMobile}
+    <header class="mobile-bar">
+      <button
+        type="button"
+        class="menu-btn"
+        aria-label={drawerOpen ? "Close menu" : "Open menu"}
+        aria-expanded={drawerOpen}
+        onclick={() => (drawerOpen = !drawerOpen)}
+      >
+        {drawerOpen ? "✕" : "☰"}
+      </button>
+      <span class="mobile-title">
+        {#if activeChannel}<span class="hash">#</span>{activeChannel.name}{:else}discord-clone{/if}
+      </span>
+    </header>
+  {/if}
+
+  <!-- Both rails live inside this drawer. On desktop `display: contents` dissolves
+       the wrapper so the rails sit directly in their grid columns; on mobile it
+       becomes a slide-in panel covering the chat. -->
+  <div class="drawer">
   <!-- Left rail: Voice on top, Channels below, with the signed-in line pinned to the
        bottom (just above the fixed version badge). -->
   <nav class="rail">
@@ -204,7 +262,7 @@
               class="channel"
               class:active={c.id === channelStore.activeId}
               class:unread={unread > 0}
-              onclick={() => channelStore.select(c.id)}
+              onclick={() => selectChannel(c.id)}
             >
               <span class="hash">#</span><span class="cname">{c.name}</span>
               {#if unread > 0}
@@ -222,32 +280,6 @@
       </section>
     </div>
   </nav>
-
-  <!-- Drag handle on the rail's right edge: widen the left rail up to 500px.
-       A focusable role="separator" is the correct splitter pattern; the a11y
-       lints below don't recognize it as interactive, so they're suppressed. -->
-  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <div
-    class="rail-resizer"
-    class:active={resizing}
-    role="separator"
-    aria-orientation="vertical"
-    aria-label="Resize sidebar"
-    aria-valuemin={RAIL_MIN}
-    aria-valuemax={RAIL_MAX}
-    aria-valuenow={railWidth}
-    tabindex="0"
-    onpointerdown={startResize}
-    onkeydown={onResizeKey}
-  ></div>
-
-  <!-- Center: the channel viewer fills the remaining horizontal space and full height. -->
-  <main class="content">
-    <section class="card pane-card">
-      <MessagePane />
-    </section>
-  </main>
 
   <!-- Right rail: members. -->
   <aside class="members-rail">
@@ -281,6 +313,34 @@
       </section>
     </div>
   </aside>
+  </div>
+
+  <!-- Drag handle on the rail's right edge: widen the left rail up to 500px.
+       A focusable role="separator" is the correct splitter pattern; the a11y
+       lints below don't recognize it as interactive, so they're suppressed.
+       Hidden on mobile (the drawer has no draggable boundary). -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div
+    class="rail-resizer"
+    class:active={resizing}
+    role="separator"
+    aria-orientation="vertical"
+    aria-label="Resize sidebar"
+    aria-valuemin={RAIL_MIN}
+    aria-valuemax={RAIL_MAX}
+    aria-valuenow={railWidth}
+    tabindex="0"
+    onpointerdown={startResize}
+    onkeydown={onResizeKey}
+  ></div>
+
+  <!-- Center: the channel viewer fills the remaining horizontal space and full height. -->
+  <main class="content">
+    <section class="card pane-card">
+      <MessagePane />
+    </section>
+  </main>
 </div>
 
 <!-- Create-channel modal: lifts the form out of the cramped rail into a centered
@@ -404,23 +464,114 @@
     overflow-y: auto;
   }
 
-  /* Too narrow for three columns: stack into one scrolling page. */
-  @media (max-width: 900px) {
-    .app-shell {
-      display: block;
-      height: auto;
-    }
-    .rail,
-    .members-rail {
-      overflow: visible;
-    }
-    .pane-card {
-      min-height: 24rem;
-    }
-    /* Single-column stacked layout has no rail boundary to drag. */
-    .rail-resizer {
-      display: none;
-    }
+  /* On desktop the drawer wrapper dissolves so the two rails sit directly in
+     their grid columns (grid-column is set on each rail explicitly). */
+  .drawer {
+    display: contents;
+  }
+
+  /* The mobile top bar is desktop-hidden; shown only via the `.mobile` class. */
+  .mobile-bar {
+    display: none;
+  }
+
+  /* ---- Narrow screens: single chat column + slide-in drawer ------------- */
+  .app-shell.mobile {
+    display: flex;
+    flex-direction: column;
+    /* dvh tracks the mobile browser's shrinking viewport (URL bar) where supported. */
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  .app-shell.mobile .mobile-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: none;
+    padding: 0.5rem 0.75rem;
+    background: var(--surface);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    /* Above the drawer so the close (✕) button stays reachable. */
+    z-index: 30;
+  }
+  .menu-btn {
+    flex: none;
+    width: 2.25rem;
+    height: 2.25rem;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    line-height: 1;
+    background: none;
+    color: var(--text);
+    border-radius: 0.4rem;
+  }
+  .menu-btn:hover {
+    background: var(--accent);
+  }
+  .mobile-title {
+    min-width: 0;
+    font-weight: 600;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mobile-title .hash {
+    color: var(--muted);
+    margin-right: 0.15rem;
+  }
+
+  /* Chat fills the rest of the screen below the bar. */
+  .app-shell.mobile .content {
+    flex: 1;
+    min-height: 0;
+    padding: 0.75rem;
+  }
+
+  /* No draggable rail boundary on mobile. */
+  .app-shell.mobile .rail-resizer {
+    display: none;
+  }
+
+  /* The drawer becomes a full-view slide-in panel holding both rails stacked. */
+  .app-shell.mobile .drawer {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    /* Clear the top bar (which sits above on z-index). */
+    padding: 3.5rem 1rem 1rem;
+    background: var(--bg);
+    overflow-y: auto;
+    z-index: 20;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+  }
+  .app-shell.mobile.drawer-open .drawer {
+    transform: translateX(0);
+  }
+  /* Inside the drawer the rails are plain stacked blocks, not grid tracks.
+     flex: none keeps them at their content height so the drawer scrolls instead
+     of the flex column squeezing them until their contents overlap. */
+  .app-shell.mobile .rail,
+  .app-shell.mobile .members-rail {
+    flex: none;
+    overflow: visible;
+    padding: 0;
+  }
+  /* The left rail's footer normally pushes the profile to the bottom of a full-
+     height column; in the stacked drawer that gap is dead space, so collapse it. */
+  .app-shell.mobile .rail-footer {
+    margin-top: 0;
+    padding-bottom: 0;
   }
 
   h2 {
