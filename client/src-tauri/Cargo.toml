@@ -1,6 +1,6 @@
 [package]
 name = "discord-clone"
-version = "0.3.1"
+version = "0.3.2"
 description = "discord-clone desktop client"
 authors = ["discord-clone"]
 edition = "2021"
