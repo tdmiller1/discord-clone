@@ -4,7 +4,7 @@
  * mapping of HTTP status + { error } bodies to a discriminated result type so screens
  * can surface specific messages. No runes here; bundler imports (no .js suffix).
  */
-import type { SessionResponse } from "./types";
+import type { PublicUser, SessionResponse } from "./types";
 
 export type AuthErrorCode =
   | "invalid_token"
@@ -125,6 +125,39 @@ export async function createInvite(serverUrl: string, token: string): Promise<In
   const parsed = (await res.json().catch(() => ({}))) as { token?: unknown; error?: unknown };
   if (res.status === 201 && typeof parsed.token === "string") {
     return { ok: true, token: parsed.token };
+  }
+  return { ok: false, error: mapError(res.status, parsed.error) };
+}
+
+export type UpdateUsernameResult =
+  | { ok: true; user: PublicUser }
+  | { ok: false; error: AuthErrorCode };
+
+/**
+ * PATCH /api/users/me (Bearer) — change the signed-in user's username. Returns the
+ * updated PublicUser on 200; maps 409→username_taken, 400→bad_request,
+ * 429→rate_limited, 401→unauthorized, network failure→network (reuses {@link mapError}).
+ * The session/token is unchanged, so callers keep using the same token afterward.
+ */
+export async function updateUsername(args: {
+  serverUrl: string;
+  token: string;
+  username: string;
+}): Promise<UpdateUsernameResult> {
+  const { serverUrl, token, username } = args;
+  let res: Response;
+  try {
+    res = await fetch(new URL("/api/users/me", serverUrl), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ username }),
+    });
+  } catch {
+    return { ok: false, error: "network" };
+  }
+  const parsed = (await res.json().catch(() => ({}))) as { user?: unknown; error?: unknown };
+  if (res.status === 200 && parsed.user !== undefined) {
+    return { ok: true, user: parsed.user as PublicUser };
   }
   return { ok: false, error: mapError(res.status, parsed.error) };
 }

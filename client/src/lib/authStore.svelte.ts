@@ -43,6 +43,12 @@ export const store = {
     _expiresAt = body.expiresAt;
   },
 
+  /** Replace the current user (e.g. after a profile/username change) without touching
+   * the token/expiry — the session is unaffected by a username change. */
+  setUser(user: PublicUser): void {
+    _currentUser = user;
+  },
+
   /** Update the server URL and persist it to localStorage. */
   setServerUrl(url: string): void {
     _serverUrl = url;

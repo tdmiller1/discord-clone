@@ -83,6 +83,12 @@ export interface PresenceUpdatePayload {
   voiceChannelId: number | null; // the voice channel the user is in, or null when not in voice (M4)
 }
 
+/** server→client: op `user.update` — a user changed their profile (username). Merge the
+ * new PublicUser into the member map, preserving live presence (status/voiceChannelId). */
+export interface UserUpdatePayload {
+  user: PublicUser;
+}
+
 /* ── Voice (M4) WS payloads — mirror story-003 contracts/voice-protocol.md verbatim.
  * mediasoup param objects (rtpCapabilities, iceParameters, iceCandidates, dtlsParameters,
  * rtpParameters) pass through `unknown` at the gateway boundary; the voice engine casts them
@@ -205,6 +211,7 @@ export interface Envelope<Op extends string = string, D = unknown> {
 export type ServerFrame =
   | Envelope<"ready", ReadyPayload>
   | Envelope<"presence.update", PresenceUpdatePayload>
+  | Envelope<"user.update", UserUpdatePayload>
   | Envelope<"channel.create", ChannelCreatePayload>
   | Envelope<"message.create", MessageCreatePayload>
   | Envelope<"voice.joined", VoiceJoinedPayload>

@@ -115,6 +115,20 @@ function handleFrame(frame: ServerFrame): void {
       _members = new Map(_members);
       break;
     }
+    case "user.update": {
+      // A profile change (e.g. username). Overlay the new PublicUser fields, keeping
+      // the member's live presence (status/voiceChannelId). Seed an offline entry if
+      // we somehow don't know this user yet (shouldn't happen — `ready` lists all).
+      const u = frame.d.user;
+      const existing = _members.get(u.id);
+      _members.set(u.id, {
+        ...u,
+        status: existing?.status ?? "offline",
+        voiceChannelId: existing?.voiceChannelId ?? null,
+      });
+      _members = new Map(_members); // reassign to recompute the derived list + author names
+      break;
+    }
     case "channel.create": {
       // Dedupe by id (the creator's own socket + the 201 response can both deliver it).
       _channels.set(frame.d.channel.id, frame.d.channel);
