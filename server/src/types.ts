@@ -13,6 +13,7 @@ export interface UserRow {
   display_name: string | null;
   created_at: number;
   disabled: number; // 0 | 1
+  avatar_attachment_id: number | null; // FK → attachments(id): current profile picture
 }
 
 export interface SessionRow {
@@ -71,6 +72,9 @@ export interface PublicUser {
   username: string;
   displayName: string | null;
   createdAt: number;
+  /** Attachment id of the current profile picture, or null if none set. Clients
+   * fetch the bytes from `GET /api/attachments/:id` (like any inline image). */
+  avatarId: number | null;
 }
 
 /** Maps a `users` row (snake_case, with the hash) to the public API shape. */
@@ -80,6 +84,7 @@ export function toPublicUser(row: UserRow): PublicUser {
     username: row.username,
     displayName: row.display_name,
     createdAt: row.created_at,
+    avatarId: row.avatar_attachment_id,
   };
 }
 
@@ -187,8 +192,8 @@ export interface PresenceUpdatePayload {
 }
 
 /**
- * server→client: op `user.update` — a user changed their profile (currently just
- * username). Carries the full PublicUser so clients can refresh the member list and
+ * server→client: op `user.update` — a user changed their profile (username or
+ * avatar). Carries the full PublicUser so clients can refresh the member list and
  * historical message author names without a reconnect (presence is unaffected).
  */
 export interface UserUpdatePayload {

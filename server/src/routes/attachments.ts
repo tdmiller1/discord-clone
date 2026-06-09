@@ -1,11 +1,11 @@
 import type { FastifyInstance, FastifyPluginAsync } from "fastify";
 import { createReadStream, promises as fs } from "node:fs";
 import { join } from "node:path";
-import { type Config, imagesDir } from "../config.js";
+import type { Config } from "../config.js";
 import { requireAuth } from "../auth.js";
-import { createAttachment, getAttachmentById } from "../attachments.js";
+import { getAttachmentById } from "../attachments.js";
 import { toPublicAttachment } from "../types.js";
-import { sniffImage } from "../images.js";
+import { parseImageUpload, persistImageAttachment } from "../uploads.js";
 
 interface AttachmentRoutesOptions {
   config: Config;
@@ -42,68 +42,13 @@ const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> = async (
     "/api/attachments",
     { preHandler: requireAuth },
     async (request, reply) => {
-      let part;
-      try {
-        part = await request.file();
-      } catch (err) {
-        if ((err as { code?: string }).code === "FST_REQ_FILE_TOO_LARGE") {
-          return reply.code(413).send({ error: "file_too_large" });
-        }
-        return reply.code(400).send({ error: "not_multipart" });
+      const upload = await parseImageUpload(request);
+      if (!upload.ok) {
+        return reply.code(upload.status).send({ error: upload.error });
       }
 
-      if (part === undefined) {
-        return reply.code(400).send({ error: "no_file" });
-      }
-
-      let buffer: Buffer;
-      try {
-        buffer = await part.toBuffer();
-      } catch (err) {
-        if ((err as { code?: string }).code === "FST_REQ_FILE_TOO_LARGE") {
-          return reply.code(413).send({ error: "file_too_large" });
-        }
-        throw err;
-      }
-
-      if (part.file.truncated) {
-        return reply.code(413).send({ error: "file_too_large" });
-      }
-      if (buffer.length === 0) {
-        return reply.code(400).send({ error: "no_file" });
-      }
-
-      const probe = sniffImage(buffer);
-      if (probe === null) {
-        return reply.code(400).send({ error: "invalid_image" });
-      }
-
-      const filename = part.filename ?? "upload";
-      const row = createAttachment(db, {
-        uploaderId: request.user!.id,
-        filename,
-        contentType: probe.contentType,
-        size: buffer.length,
-        width: probe.width,
-        height: probe.height,
-        path: "",
-      });
-
-      const relPath = join("images", String(row.id));
-      const absPath = join(imagesDir(config), String(row.id));
-      try {
-        await fs.writeFile(absPath, buffer);
-        db.prepare("UPDATE attachments SET path = ? WHERE id = ?").run(
-          relPath,
-          row.id,
-        );
-      } catch (err) {
-        db.prepare("DELETE FROM attachments WHERE id = ?").run(row.id);
-        await fs.rm(absPath, { force: true });
-        throw err;
-      }
-
-      return reply.code(201).send(toPublicAttachment({ ...row, path: relPath }));
+      const row = await persistImageAttachment(db, config, upload, request.user!.id);
+      return reply.code(201).send(toPublicAttachment(row));
     },
   );
 

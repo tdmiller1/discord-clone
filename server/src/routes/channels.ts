@@ -7,6 +7,7 @@ import {
   getChannelById,
   getChannelMessages,
   nextChannelPosition,
+  normalizeChannelName,
 } from "../channels.js";
 import { toPublicChannel, toPublicMessage } from "../types.js";
 
@@ -62,7 +63,8 @@ const channelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = async (
     "/api/channels",
     { schema: createChannelSchema, preHandler: requireAuth },
     async (request, reply) => {
-      const name = request.body.name.trim();
+      // Spaces aren't allowed in channel names — collapse them to hyphens (SPEC.md §9).
+      const name = normalizeChannelName(request.body.name);
       if (name.length === 0) {
         return reply.code(400).send({ error: "channel_name_invalid" });
       }

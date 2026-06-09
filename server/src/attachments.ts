@@ -78,3 +78,9 @@ export function linkAttachmentToMessage(
     .run(messageId, attachmentId);
   return info.changes === 1;
 }
+
+/** Deletes an attachment row by id (no-op if absent). The caller removes the
+ * on-disk file separately — used to reclaim a superseded avatar (SPEC.md §6). */
+export function deleteAttachment(db: Db, id: number): void {
+  db.prepare("DELETE FROM attachments WHERE id = ?").run(id);
+}

@@ -16,7 +16,13 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   display_name TEXT,
   created_at INTEGER NOT NULL,
-  disabled INTEGER NOT NULL DEFAULT 0
+  disabled INTEGER NOT NULL DEFAULT 0,
+  -- avatar_attachment_id: nullable FK → attachments(id), the user's current
+  -- profile picture (an unlinked, message_id-NULL attachment). Forward reference
+  -- is fine (SQLite resolves FK targets lazily within a single db.exec, same as
+  -- messages.attachment_id). Existing M1+ databases predate this column, so
+  -- applySchema() backfills it via ALTER TABLE (see migrate()).
+  avatar_attachment_id INTEGER REFERENCES attachments(id)
 );
 
 CREATE TABLE IF NOT EXISTS invite_tokens (
@@ -90,7 +96,28 @@ CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages(channel_id, id);
 CREATE INDEX IF NOT EXISTS idx_attachments_message_id ON attachments(message_id);
 `;
 
-/** Applies the M1/M2/M3 schema (idempotent). Safe to call on every open and from the CLI/tests. */
+/** True if `column` exists on `table` (via PRAGMA table_info). `table` is a trusted
+ * literal here, never user input, so interpolating it into the pragma is safe. */
+function columnExists(db: Database, table: string, column: string): boolean {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  return cols.some((c) => c.name === column);
+}
+
+/**
+ * Additive, idempotent migrations for columns the original `CREATE TABLE IF NOT
+ * EXISTS` can't backfill (SQLite has no `ADD COLUMN IF NOT EXISTS`). Each step is
+ * guarded by a column-existence check so it runs once on legacy databases and is a
+ * no-op on fresh ones (which already get the column from SCHEMA_SQL).
+ */
+function migrate(db: Database): void {
+  if (!columnExists(db, "users", "avatar_attachment_id")) {
+    // Default NULL — required for ALTER TABLE ... ADD COLUMN with a REFERENCES clause.
+    db.exec("ALTER TABLE users ADD COLUMN avatar_attachment_id INTEGER REFERENCES attachments(id)");
+  }
+}
+
+/** Applies the M1/M2/M3 schema + additive migrations (idempotent). Safe to call on every open and from the CLI/tests. */
 export function applySchema(db: Database): void {
   db.exec(SCHEMA_SQL);
+  migrate(db);
 }

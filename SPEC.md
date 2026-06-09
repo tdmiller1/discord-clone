@@ -131,7 +131,7 @@ JSON envelope: `{ "op": "<event>", "d": { ... } }`. Client authenticates on conn
 
 ## 8. Data model (SQLite)
 
-- **users**: `id, username UNIQUE, password_hash, display_name, created_at, disabled`
+- **users**: `id, username UNIQUE, password_hash, display_name, created_at, disabled, avatar_attachment_id NULL` (FK → attachments; current profile picture)
 - **invite_tokens**: `id, token_hash, created_by, created_at, used_by NULL, used_at NULL, revoked`
 - **sessions**: `id, user_id, token_hash, created_at, expires_at, revoked`
 - **channels**: `id, name, type (text|voice), position, created_by, created_at`
@@ -141,6 +141,7 @@ JSON envelope: `{ "op": "<event>", "d": { ... } }`. Client authenticates on conn
 ## 9. Text channels & messages
 
 - Any member can create a text channel (`POST /api/channels {name, type:"text"}`) → broadcast `channel.create`.
+- Channel names are normalized server-side: trimmed, with each run of whitespace collapsed to a single `-` (no spaces). The client mirrors this live in the create field; the server stays authoritative.
 - Send: `message.send` over WS → persisted → broadcast `message.create` to channel members.
 - History: `GET /api/channels/:id/messages?before=<cursor>&limit=50` (keyset pagination on `id`).
 - Ordering by server-assigned monotonic `id`/`created_at`. Plain text content in v1 (no markdown/mentions).
@@ -152,6 +153,11 @@ JSON envelope: `{ "op": "<event>", "d": { ... } }`. Client authenticates on conn
 - Download/stream: `GET /api/attachments/:id` (auth-checked), correct `Content-Type`.
 - Limits: allow `image/png|jpeg|gif|webp`; max size (default **10 MB**, configurable). Thumbnails optional/deferred.
 - Client renders images inline in the message list.
+- **Profile pictures** reuse this pipeline: `PATCH /api/users/me/avatar` (multipart, same
+  validation) stores the image as an unlinked attachment, points `users.avatar_attachment_id`
+  at it (reclaiming the previous one), and broadcasts `user.update` so every client refreshes
+  the picture live. `PublicUser` carries `avatarId`; clients fetch the bytes via
+  `GET /api/attachments/:id` like any inline image. Falls back to a name-derived initial when unset.
 
 ## 11. Voice (SFU-lite) flow
 

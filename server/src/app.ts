@@ -93,20 +93,25 @@ export async function buildApp(config: Config): Promise<FastifyInstance> {
     timeWindow: config.authRateWindowMs,
   });
 
+  // Multipart parser for image uploads, capped at MAX_UPLOAD_MB so oversized
+  // uploads are rejected by the framework rather than buffered unboundedly
+  // (SPEC.md §10). Registered before EVERY route plugin that consumes it — a
+  // content-type parser added by a sibling plugin is only visible to siblings
+  // registered after it, so this must precede userRoutes (avatar upload) and
+  // attachmentRoutes alike.
+  void app.register(multipart, {
+    limits: { fileSize: config.maxUploadMb * 1024 * 1024, files: 1 },
+  });
+
   // Auth REST endpoints (register/login/logout/refresh). Config is passed via the
   // register options so handlers can read the session TTL and rate-limit knobs.
   void app.register(authRoutes, { config });
 
-  // User-profile REST endpoints (PATCH /api/users/me — change username). Registered
-  // after rate-limit so it can opt into the same per-IP throttle as the auth routes.
+  // User-profile REST endpoints: PATCH /api/users/me (username) + /api/users/me/avatar
+  // (multipart profile-picture upload). Registered after rate-limit so it can opt
+  // into the same per-IP throttle as the auth routes, and after multipart so the
+  // avatar route can parse its image part.
   void app.register(userRoutes, { config });
-
-  // Multipart parser for image uploads, capped at MAX_UPLOAD_MB so oversized
-  // uploads are rejected by the framework rather than buffered unboundedly
-  // (SPEC.md §10). Registered before the attachment routes that consume it.
-  void app.register(multipart, {
-    limits: { fileSize: config.maxUploadMb * 1024 * 1024, files: 1 },
-  });
 
   // Channel REST endpoints: create channel + message history (SPEC.md §9).
   void app.register(channelRoutes, { config });

@@ -19,6 +19,16 @@ export type MessageWithAttachment = {
  * second round-trip.
  */
 
+/**
+ * Normalizes a channel name to the Discord-style rule: trimmed, with every run of
+ * whitespace collapsed to a single hyphen so a channel name never contains spaces
+ * (SPEC.md §9). The server is authoritative — the client mirrors this for live
+ * feedback, but this is what actually gets persisted.
+ */
+export function normalizeChannelName(raw: string): string {
+  return raw.trim().replace(/\s+/g, "-");
+}
+
 /** Inserts a channel and returns the persisted row. */
 export function createChannel(
   db: Db,
