@@ -33,19 +33,14 @@ services:
 
   # Hosted web client (nginx serving the Vite build of the Svelte app). A third
   # deployable alongside the Tauri desktop app — same webview code, full voice via
-  # mediasoup-client. VITE_SERVER_URL bakes the public API URL into the bundle so
-  # the hosted client targets it by default (users can still override on login).
+  # mediasoup-client. The public API/app URLs (VITE_SERVER_URL/VITE_APP_URL) are baked
+  # into the bundle at BUILD time by CI from the repo Actions Variables, so the
+  # published image already targets the public deployment. Pull it from GHCR by default
+  # (same as the server image); override/pin via WEB_IMAGE_TAG in the root .env.
+  # Building from source is the dev-only path — see docs/DEVELOPMENT.md.
   # Reached by the tunnel via http://localhost:8083 (cloudflared is on host net).
   web:
-    build:
-      context: ./client
-      dockerfile: Dockerfile.web
-      args:
-        VITE_SERVER_URL: ${VITE_SERVER_URL:-}
-        # Public URL of the hosted web client, baked in so the in-app "invite a friend"
-        # button builds shareable links pointing back here (e.g. https://app.example.com).
-        VITE_APP_URL: ${VITE_APP_URL:-}
-    image: discord-clone-web:dev
+    image: ghcr.io/tdmiller1/discord-clone-web:${WEB_IMAGE_TAG:-latest}
     ports:
       - "8083:80"
     restart: unless-stopped
