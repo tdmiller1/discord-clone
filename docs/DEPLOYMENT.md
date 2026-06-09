@@ -4,15 +4,24 @@ Operations reference for a **deployed** discord-clone server. For the step-by-st
 see the deploy runbook in the [root `README.md`](../README.md). For building from source /
 contributing, see [`docs/DEVELOPMENT.md`](DEVELOPMENT.md).
 
-The production bundle lives under `deploy/` (`docker-compose.yml`, `.env.example`, `Caddyfile`);
-it pulls the published image from GHCR and fronts it with Caddy for TLS. The root
-`docker-compose.yml` is the dev/contributor file that builds from source.
+The **recommended** deployment is the **root `docker-compose.yml`**: `server` + the hosted `web`
+client + a **Cloudflare Tunnel** (`cloudflared`) that publishes both over HTTPS/WSS with no inbound
+TCP ports and no certificates to manage; voice runs over a direct UDP port forward. The `deploy/`
+bundle (`docker-compose.yml`, `.env.example`, `Caddyfile`) is the **alternative** for operators who
+prefer to terminate TLS themselves with Caddy + a domain pointed straight at the host — it pulls the
+published GHCR image instead of building from source.
 
 ## Environment variables
 
-Set operator vars in `deploy/.env` (copied from `deploy/.env.example`). The canonical var list
-is **SPEC.md §12**; per-var defaults live in [`server/.env.example`](../server/.env.example).
-Required vars use Compose's `${VAR:?}` so `docker compose up` **fails fast** if unset.
+**Recommended (Cloudflare Tunnel) path** — set vars in the **root `.env`** (copied from
+[`.env.example`](../.env.example)): `CLOUDFLARE_TUNNEL_TOKEN`, `PUBLIC_HOST`, `VITE_SERVER_URL`,
+`VITE_APP_URL`, and optionally `RTC_EXTRA_ANNOUNCED_IPS`. The root `README.md` deploy runbook
+documents each. `.env` is gitignored, so the tunnel token and public IP never get committed.
+
+**Alternative (Caddy) path** — set operator vars in `deploy/.env` (copied from
+`deploy/.env.example`); the table below covers them. The canonical var list is **SPEC.md §12**;
+per-var defaults live in [`server/.env.example`](../server/.env.example). Required vars use
+Compose's `${VAR:?}` so `docker compose up` **fails fast** if unset.
 
 | Var | Required? | Default | Notes |
 | --- | --- | --- | --- |
@@ -128,8 +137,8 @@ minted token creates the first account.
 ## Voice / ICE troubleshooting
 
 Typical symptom: text, images, and `/health` all work, but **voice is silent**. Voice media is
-raw DTLS-SRTP UDP that bypasses Caddy and goes straight to the host, so it has its own failure
-modes:
+raw DTLS-SRTP UDP that **bypasses the tunnel/proxy** and goes straight to the host, so it has its
+own failure modes:
 
 1. **`PUBLIC_HOST` must be the real routable host — never `localhost`.** It is the address the
    SFU announces as its ICE candidate (`announcedIp`, SPEC.md §11). If it's `localhost` or an
@@ -137,22 +146,35 @@ modes:
    For on-LAN clients that need a direct candidate, add the host's LAN IP via
    `RTC_EXTRA_ANNOUNCED_IPS` (each extra IP consumes one more UDP port/transport from the range).
 2. **The UDP media range `40000-40010` must be reachable directly.** Allow it in the host
-   firewall and **UDP-forward it on the router** to the host. It is raw DTLS-SRTP — Caddy (and
-   any tunnel) only carries TCP 80/443, so it never proxies the media.
+   firewall and **UDP-forward it on the router** to the host (and set a DHCP reservation so the
+   forward survives a lease change). It is raw DTLS-SRTP — the **Cloudflare Tunnel only carries the
+   HTTPS/WSS (TCP) traffic** (as does Caddy on 80/443), so it never proxies the media. **This is the
+   single most common cause of dead voice on the recommended tunnel setup.**
 3. **WSS upgrade must survive the proxy.** The gateway and voice signaling ride
-   `wss://<CADDY_SITE>/ws`. Caddy's `reverse_proxy` forwards the `Upgrade`/`Connection` headers
-   automatically, but a custom/misconfigured proxy that drops them breaks the WS gateway even
-   though `/health` still returns 200.
+   `wss://discord.example.com/ws`. A Cloudflare Tunnel forwards the WebSocket `Upgrade`
+   automatically (as does Caddy's `reverse_proxy`), but a custom/misconfigured proxy that drops the
+   `Upgrade`/`Connection` headers breaks the WS gateway even though `/health` still returns 200.
 
-## TLS options
+## TLS / public access options
 
-**Caddy is the primary documented TLS path** (SPEC.md §12): it auto-provisions and renews a
-Let's Encrypt cert for `CADDY_SITE` and reverse-proxies the single origin
-(`https://<CADDY_SITE>` for `/`, `/health`, `/api/*`, attachment streams; `wss://<CADDY_SITE>/ws`
-for the gateway + voice signaling).
+**Cloudflare Tunnel is the recommended path.** The root `docker-compose.yml` runs `cloudflared`
+alongside the server and hosted web client, publishing both over HTTPS/WSS through Cloudflare with
+**no inbound TCP ports opened, no DNS pointed at your home IP, and no certificates to provision or
+renew**. Map two Public Hostnames to the local services (`discord.example.com` →
+`http://localhost:8080`, `app.example.com` → `http://localhost:8083`); the tunnel forwards the
+WebSocket `Upgrade` automatically, so `wss://discord.example.com/ws` reaches the gateway + voice
+signaling. Step-by-step in the root `README.md` deploy runbook.
 
-**Escape hatch — bring your own proxy.** Any external TLS reverse proxy works instead, including
-the existing Cloudflare tunnel, as long as it (1) terminates TLS and forwards the WebSocket
-`Upgrade` on the same origin so `wss://<host>/ws` reaches `server:8080`, and (2) lets the UDP
-media range (`40000-40010`) reach the `server` container directly. **The tunnel does not carry
-UDP — a direct router UDP forward to `PUBLIC_HOST` is still required.**
+> **Voice still needs a direct UDP forward.** The tunnel carries only HTTPS/WSS (TCP). WebRTC media
+> (UDP `40000-40010`) must be **router-forwarded straight to the host**, with `PUBLIC_HOST` set to
+> your real public IPv4 — the tunnel never carries it.
+
+**Alternative — Caddy + your own domain.** The `deploy/` bundle fronts the server with Caddy, which
+auto-provisions and renews a Let's Encrypt cert for `CADDY_SITE` and reverse-proxies the single
+origin (`https://<CADDY_SITE>` for `/`, `/health`, `/api/*`, attachment streams;
+`wss://<CADDY_SITE>/ws` for the gateway + voice signaling). This requires the domain's DNS
+`A`/`AAAA` to resolve to the host and TCP 80/443 reachable. The same UDP voice forward still applies.
+
+**Any other reverse proxy** works too, as long as it terminates TLS, forwards the WebSocket
+`Upgrade` on the same origin so `wss://<host>/ws` reaches `server:8080`, and lets the UDP media
+range (`40000-40010`) reach the `server` container directly.

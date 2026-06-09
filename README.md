@@ -21,159 +21,159 @@ Assume very simple architecture, 1 server only needs to support up to 10 clients
 - Basic VOIP channel
 - Ability to view + send images
 
-## Dev vs prod
+## Running it
 
-Two compose files, two audiences — don't mix them up:
+Three ways in, depending on who you are:
 
-- **Contributors building from source** use the **root `docker-compose.yml`** (`build: ./server`,
-  `PUBLIC_HOST: localhost`, no TLS) — see **[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)**.
-- **Admins deploying the published image** use **`deploy/docker-compose.yml`** (pulls the GHCR
-  image + fronts it with Caddy for automatic TLS) — follow the runbook below, with
-  **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)** as the operations reference.
+- **Deploy a public server (recommended) — root `docker-compose.yml`.** Brings up the server, the
+  hosted web client, and a **Cloudflare Tunnel** that publishes both over **HTTPS/WSS** with **no
+  inbound TCP ports** opened and **no TLS certificates to manage**. Voice runs over a **direct UDP
+  port forward** on your router. This is the path the
+  **[Deploy runbook](#deploy-cloudflare-tunnel--udp-voice-recommended)** below walks through.
+- **Run your own TLS instead (alternative) — `deploy/docker-compose.yml`.** Pulls the published
+  GHCR image and fronts it with Caddy (automatic Let's Encrypt) for a domain whose DNS points
+  directly at the host. See **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)**.
+- **Build / hack on it from source — [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).**
 
-## Deploy (admin runbook)
+## Deploy: Cloudflare Tunnel + UDP voice (recommended)
 
-This stands up a public **HTTPS/WSS** server with text, inline images, and voice using the
-**published server image** + Caddy (automatic Let's Encrypt TLS), then walks a user through
-installing the client and confirming everything works end-to-end. If you're building from
-source instead, see **[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)** — not this section.
+The recommended way to run a public server. A **Cloudflare Tunnel** publishes the API/gateway and
+the hosted web client over HTTPS/WSS — you open **no inbound TCP ports**, point **no DNS at your
+home IP**, and **never touch a certificate**. The *only* thing you forward on the router is the
+**UDP voice range**, because WebRTC media can't ride the tunnel (and shouldn't).
 
-Examples below use `<version>` placeholders; the current release is `0.2.1` (tag `v0.2.1`).
-Substitute the version you're deploying.
+> Prefer to terminate TLS yourself with a domain pointed straight at the host? Use the `deploy/` +
+> Caddy bundle instead — [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). Everything below assumes the
+> tunnel path.
+
+Examples use `<version>` placeholders; the current release is `0.3.0` (tag `v0.3.0`). Substitute
+the version you're deploying, and your own domain for `example.com`.
 
 ### Prerequisites
 
-- A host with **Docker + Compose**.
-- A **domain** whose DNS `A`/`AAAA` record already resolves to the host — Caddy needs this to
-  issue a Let's Encrypt cert for it before bring-up.
-- The UDP media range **`40000-40010/udp`** allowed in the host firewall **and** router-forwarded
-  directly to the host. Voice media is raw DTLS-SRTP UDP that bypasses Caddy (see step 6).
-- An **amd64 / glibc** host. The image is **`linux/amd64, glibc` ONLY — NOT arm64, NOT
-  musl/alpine** (the mediasoup SFU worker is a glibc native binary and `better-sqlite3` is
-  compiled for the image's Node ABI). It will not run on arm64.
+- A host with **Docker + Compose**, **amd64 / glibc** — **NOT arm64, NOT musl/alpine** (the
+  mediasoup SFU worker is a glibc native binary and `better-sqlite3` is compiled for the image's
+  Node ABI; it will not run on arm64).
+- A **Cloudflare account** with a domain on it (a free zone works) and a **Cloudflare Tunnel** —
+  you'll paste its connector token into `.env`.
+- Router access to **port-forward UDP `40000-40010`** to the host — the voice path (step 4).
 
-### 1. Deploy the server (prod compose, pulls the published image)
+### 1. Create the Cloudflare Tunnel
 
-From the production bundle under `deploy/`:
+In the Cloudflare **Zero Trust** dashboard → **Networks → Tunnels**, create a tunnel and copy its
+**connector token**. Add two **Public Hostnames**. Because `cloudflared` runs on **host
+networking**, each origin must be `http://localhost:<port>` — *not* a compose service name:
+
+| Public hostname | Service (origin) | Serves |
+| --- | --- | --- |
+| `discord.example.com` | `http://localhost:8080` | API + WebSocket gateway (incl. voice signaling) |
+| `app.example.com` | `http://localhost:8083` | hosted web client |
+
+> Adding or renaming one Public Hostname can delete the other's DNS record — keep **both**.
+
+### 2. Configure the root `.env`
 
 ```sh
-cd deploy
 cp .env.example .env
-$EDITOR .env            # set PUBLIC_HOST, CADDY_SITE (+ SERVER_IMAGE_TAG, CADDY_ACME_EMAIL)
-# if the GHCR package is private: docker login ghcr.io -u tdmiller1
-docker compose up -d
+$EDITOR .env
 ```
 
-Set these in `deploy/.env`:
+| Var | Set to | Why |
+| --- | --- | --- |
+| `CLOUDFLARE_TUNNEL_TOKEN` | the tunnel connector token | Lets `cloudflared` dial out and publish the hostnames. |
+| `PUBLIC_HOST` | your **real public IPv4** | The address the SFU advertises as its WebRTC ICE candidate. **Never `localhost`** — voice silently fails (text/images/`/health` still look fine). |
+| `VITE_SERVER_URL` | `https://discord.example.com` | Baked into the hosted web client so it targets the public API by default. |
+| `VITE_APP_URL` | `https://app.example.com` | Baked in so the in-app **"Invite a friend"** button builds shareable links back to the hosted client. |
+| `RTC_EXTRA_ANNOUNCED_IPS` | host's LAN IP *(optional)* | A second ICE candidate so same-LAN clients connect directly instead of hairpinning the public IP. |
 
-- `PUBLIC_HOST` — **required.** The real routable IPv4/hostname the SFU advertises as its
-  WebRTC ICE announce address. **Never `localhost`** — remote voice silently fails (text,
-  images, and `/health` still look fine).
-- `CADDY_SITE` — **required.** The public domain Caddy serves TLS for (e.g.
-  `discord.example.com`). Its DNS must resolve to this host before bring-up.
-- `SERVER_IMAGE_TAG` — optional, defaults to `latest`. **Pin a released version (e.g. `0.2.1`)
-  in prod** rather than tracking `latest`.
-- `CADDY_ACME_EMAIL` — optional. ACME account / cert-expiry email.
+`.env` is gitignored — your tunnel token and public IP never get committed.
 
-Both required vars use Compose `${VAR:?}`, so `docker compose up` **fails fast** if either is
-unset. The image pulled is `ghcr.io/tdmiller1/discord-clone-server:${SERVER_IMAGE_TAG:-latest}`.
-See **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)** for the full env-var reference.
-
-The GHCR package may be **private on first publish** — anonymous `docker pull` fails until you
-either authenticate the host:
+### 3. Bring up the stack
 
 ```sh
-echo "<PAT-with-read:packages>" | docker login ghcr.io -u tdmiller1 --password-stdin
+docker compose up -d --build      # or: npm run docker:up
 ```
 
-(a Personal Access Token with `read:packages`), or make the package public:
-GitHub → Profile → Packages → `discord-clone-server` → Package settings → Danger Zone →
-Change visibility → **Public**.
-
-### 2. Confirm HTTPS/WSS (Caddy auto-TLS)
-
-Caddy auto-issues a Let's Encrypt cert for `CADDY_SITE` and reverse-proxies to `server:8080`,
-forwarding the WebSocket `Upgrade` automatically (no manual header config). Verify the stack is
-up and serving over a real cert:
+Three services come up: `server` (API/gateway, `:8080`), `web` (hosted client, `:8083`), and
+`cloudflared` (the tunnel). Within ~a minute both hostnames serve over real HTTPS:
 
 ```sh
-curl -sf https://<CADDY_SITE>/health     # 200 over the proxy, real cert
+curl -sf https://discord.example.com/health     # 200, through the tunnel
 ```
 
-**HTTPS/WSS is required** (SPEC.md §12) — a plain `http://`/`ws://` setup breaks the client.
+**HTTPS/WSS is required** (SPEC.md §12); the tunnel provides it for free. The client derives
+`wss://discord.example.com/ws` from the `https://` URL automatically — you never enter a separate
+WebSocket URL.
 
-> **Bring your own proxy (escape hatch).** Caddy is the primary documented TLS path, but any
-> external TLS proxy works — including the existing Cloudflare tunnel — as long as it forwards
-> the WebSocket `Upgrade` on the same origin so `wss://<host>/ws` reaches `server:8080`, **and**
-> the UDP media range still reaches the container directly. The tunnel never carries UDP, so a
-> direct router UDP forward to `PUBLIC_HOST` is still required.
+### 4. Forward the UDP voice range (the one thing the tunnel can't carry)
 
-### 3. Mint an invite token (real CLI)
+WebRTC media is raw **DTLS-SRTP over UDP** and **does not traverse the Cloudflare Tunnel** — the
+tunnel only carries the HTTPS/WSS (TCP) traffic. Voice therefore needs a **direct UDP port
+forward**:
 
-Onboarding is purely **token-based** (SPEC.md §6): the admin mints a single-use invite token,
-and the **first user to register** with it creates the first account. Find the running server
-service, then mint a token:
+- On your router, **forward UDP `40000-40010`** to the Docker host.
+- Set a **DHCP reservation** for the host so the forward survives a lease change.
+- That range must match `RTC_MIN_PORT`-`RTC_MAX_PORT` and the compose UDP mapping (both pinned to
+  `40000-40010`).
+
+The direct UDP forward **plus** `PUBLIC_HOST` set to your real public IPv4 are exactly what make
+voice work — everything else rides the tunnel.
+
+### 5. Mint an invite token
+
+Onboarding is purely **token-based** (SPEC.md §6): the admin mints a single-use invite token, and
+the **first user to register** with it creates the account.
 
 ```sh
 docker compose ps                                        # show the running services
 docker compose exec server node dist/cli.js mint-token   # prints a one-time token
 ```
 
-(Equivalently, with the raw container name: `docker exec <ctr> node dist/cli.js mint-token`.)
-The token is single-use and printed once — copy it, then hand it to the user. See
-**[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)** for `revoke-user` / `revoke-token`.
+The token is single-use and printed once — copy it, then hand it to the user. (Logged-in users can
+also generate invite links in-app via **"Invite a friend"**.) See
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for `revoke-user` / `revoke-token`.
 
-> **Note — no admin-bootstrap log line.** SPEC.md §12 mentions a "first boot generates an admin
-> bootstrap credential printed to logs"; that clause is **unimplemented**. There is no separate
-> admin account and no such log line — the implemented flow (SPEC.md §6) is exactly mint-token →
-> the first user registers. Don't go looking for a credential in the logs.
+> **No admin-bootstrap log line.** SPEC.md §12 mentions a "first boot generates an admin bootstrap
+> credential printed to logs"; that clause is **unimplemented**. There is no separate admin account
+> — the real flow is mint-token → the first user registers. Don't go looking for a credential in
+> the logs.
 
-### 4. Download + install the client (GitHub Release)
+### 6. Get users connected
 
-Each release attaches the client installers to a GitHub Release:
+Two ways for a user to get in:
 
-- This version: `https://github.com/tdmiller1/discord-clone/releases/tag/v<version>`
-  (e.g. `https://github.com/tdmiller1/discord-clone/releases/tag/v0.2.1`)
-- Latest: `https://github.com/tdmiller1/discord-clone/releases/latest`
+- **Hosted web client (no install):** open `https://app.example.com` in a browser — the server URL
+  is already baked in.
+- **Desktop app:** download the installer for their OS from the GitHub Release:
+  - This version: `https://github.com/tdmiller1/discord-clone/releases/tag/v<version>`
+  - Latest: `https://github.com/tdmiller1/discord-clone/releases/latest`
 
-Pick the asset for your OS by exact filename:
+  | OS | Format | Asset filename | Install action |
+  | --- | --- | --- | --- |
+  | Windows | MSI installer | `discord-clone_<version>_x64_en-US.msi` | double-click to install |
+  | Windows | NSIS setup `.exe` | `discord-clone_<version>_x64-setup.exe` | double-click to install |
+  | Linux | AppImage (portable) | `discord-clone_<version>_amd64.AppImage` | `chmod +x` then run directly |
+  | Linux | Debian package | `discord-clone_<version>_amd64.deb` | `sudo apt install ./<file>.deb` |
 
-| OS | Format | Asset filename | Install action |
-| --- | --- | --- | --- |
-| Windows | MSI installer | `discord-clone_<version>_x64_en-US.msi` | double-click to install |
-| Windows | NSIS setup `.exe` | `discord-clone_<version>_x64-setup.exe` | double-click to install |
-| Linux | AppImage (portable) | `discord-clone_<version>_amd64.AppImage` | `chmod +x` then run directly |
-| Linux | Debian package | `discord-clone_<version>_amd64.deb` | `sudo apt install ./<file>.deb` |
+  For `v0.3.0`: `discord-clone_0.3.0_x64_en-US.msi`, `discord-clone_0.3.0_x64-setup.exe`,
+  `discord-clone_0.3.0_amd64.AppImage`, `discord-clone_0.3.0_amd64.deb`. **amd64 / x64 only** —
+  there are no arm64 or macOS builds.
 
-For `v0.2.1` those are `discord-clone_0.2.1_x64_en-US.msi`, `discord-clone_0.2.1_x64-setup.exe`,
-`discord-clone_0.2.1_amd64.AppImage`, and `discord-clone_0.2.1_amd64.deb`. **amd64 / x64 only**
-— there are no arm64 or macOS builds.
+  > **Installers are unsigned.** Expect a Windows SmartScreen warning ("Windows protected your PC" →
+  > More info → Run anyway) and a Linux "untrusted AppImage" prompt. Both are normal and must be
+  > explicitly allowed.
 
-> **Installers are unsigned.** Expect a Windows SmartScreen warning ("Windows protected your
-> PC" → More info → Run anyway) and a Linux "untrusted AppImage" prompt. These are normal and
-> must be explicitly allowed.
+On first launch the desktop client asks for a **server URL** (`https://discord.example.com`), the
+**invite token** from step 5, and a desired username + password. Registering consumes the token and
+opens a session; thereafter the user logs in with username + password.
 
-### 5. Register → login → connect
+### 7. Confirm it works end-to-end
 
-On first launch the client asks for a server URL, an invite token, and a desired username +
-password:
-
-1. Server URL: `https://<CADDY_SITE>`.
-2. Paste the invite token from step 3, choose a username + password → registers (consumes the
-   token) and opens a session.
-3. Thereafter, log in with username + password.
-
-The client derives `wss://<CADDY_SITE>/ws` from the `https://` URL automatically — you do not
-enter a separate WebSocket URL.
-
-### 6. Confirm it works end-to-end
-
-- **Text** — create or open a text channel and send a message.
+- **Text** — open a text channel and send a message.
 - **Images** — upload an image and confirm it renders inline in the message list.
 - **Voice** — join the single voice channel from a second client and confirm two-way audio.
 
-> **If text/images/`/health` work but voice is silent**, the cause is almost always
-> `PUBLIC_HOST` set to `localhost`/an unroutable value, or the UDP `40000-40010` range not being
-> firewall-open and router-forwarded to the host. Voice media is raw DTLS-SRTP UDP sent directly
-> to `PUBLIC_HOST`, bypassing Caddy entirely. See the voice/ICE troubleshooting in
-> **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)**.
+> **Text/images/`/health` work but voice is silent?** Almost always either `PUBLIC_HOST` set to
+> `localhost`/an unroutable value, or the UDP `40000-40010` range not **forwarded on the router** to
+> the host. Voice media is raw DTLS-SRTP UDP sent straight to `PUBLIC_HOST`, bypassing the tunnel
+> entirely. See the voice/ICE troubleshooting in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
