@@ -63,6 +63,10 @@ fn enable_webkit_media_capture(app: &tauri::App) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Auto-update: `updater` checks the configured endpoint and installs signed
+        // releases; `process` provides the `relaunch` the frontend calls afterwards.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|_app| {
             #[cfg(target_os = "linux")]
             enable_webkit_media_capture(_app);

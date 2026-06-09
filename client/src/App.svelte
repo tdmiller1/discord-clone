@@ -10,6 +10,7 @@
   import { deleteSession, getSession, setSession } from "./lib/session";
   import { clearCache as clearAttachmentImages } from "./lib/attachmentImages";
   import { voice } from "./lib/voice.svelte";
+  import { startAutoUpdate } from "./lib/updater.svelte";
 
   type View = "loading" | "register" | "login" | "app";
 
@@ -93,6 +94,7 @@
 
   onMount(() => {
     void bootstrap();
+    startAutoUpdate(); // desktop only (no-op in the web build); polls for new releases every 60s
   });
 </script>
 

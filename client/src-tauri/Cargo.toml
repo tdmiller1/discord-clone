@@ -1,6 +1,6 @@
 [package]
 name = "discord-clone"
-version = "0.3.0"
+version = "0.3.1"
 description = "discord-clone desktop client"
 authors = ["discord-clone"]
 edition = "2021"
@@ -19,6 +19,12 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+
+# Auto-update: the updater plugin downloads + signature-verifies + installs newer
+# releases in place; the process plugin's `relaunch` restarts into the new version.
+# The frontend (lib/updater.svelte.ts) drives both; see plugins.updater in tauri.conf.json.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 # Linux only: WebKitGTK does not enable media capture or grant getUserMedia by
 # default, so the voice channel reports "0 devices" even when the OS mic works.
