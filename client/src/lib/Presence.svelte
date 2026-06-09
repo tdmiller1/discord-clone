@@ -418,6 +418,10 @@
      is pushed to the bottom. */
   .rail {
     grid-column: 1;
+    /* Pin to row 1 explicitly. The rails are wrapped in `.drawer` and so appear
+       in DOM order col1, col3, col2 — without an explicit row, auto-placement
+       bumps `.content` (col 2) into an implicit row 2 because it follows col 3. */
+    grid-row: 1;
     display: flex;
     flex-direction: column;
     gap: 1rem;
@@ -438,6 +442,7 @@
      the global centered-column `main` rule. */
   .content {
     grid-column: 2;
+    grid-row: 1;
     max-width: none;
     margin: 0;
     padding: 1rem;
@@ -456,6 +461,7 @@
   /* Right rail: profile + members. */
   .members-rail {
     grid-column: 3;
+    grid-row: 1;
     display: flex;
     flex-direction: column;
     gap: 1rem;
