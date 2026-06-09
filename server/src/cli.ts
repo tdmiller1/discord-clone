@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { loadConfig } from "./config.js";
 import { openDatabase, type Db } from "./db.js";
-import { generateToken, hashToken } from "./crypto.js";
+import { mintToken } from "./tokens.js";
 
 const USAGE = `Usage: server <command> [args]
 
@@ -11,12 +11,8 @@ Commands:
   revoke-token <id>       Revoke an unused invite token by id
   --help, -h              Show this help`;
 
-function mintToken(db: Db): void {
-  const raw = generateToken();
-  db.prepare(
-    "INSERT INTO invite_tokens (token_hash, created_by, created_at, revoked) VALUES (?, NULL, ?, 0)",
-  ).run(hashToken(raw), Date.now());
-  console.log(raw);
+function mintTokenCommand(db: Db): void {
+  console.log(mintToken(db));
 }
 
 function revokeUser(db: Db, username: string | undefined): void {
@@ -89,7 +85,7 @@ function main(): void {
   try {
     switch (command) {
       case "mint-token":
-        mintToken(db);
+        mintTokenCommand(db);
         break;
       case "revoke-user":
         revokeUser(db, argv[1]);
