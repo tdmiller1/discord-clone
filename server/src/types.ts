@@ -186,6 +186,15 @@ export interface PresenceUpdatePayload {
   voiceChannelId: number | null;
 }
 
+/**
+ * server→client: op `user.update` — a user changed their profile (currently just
+ * username). Carries the full PublicUser so clients can refresh the member list and
+ * historical message author names without a reconnect (presence is unaffected).
+ */
+export interface UserUpdatePayload {
+  user: PublicUser;
+}
+
 /** client→server: op `identify` (the M1 auth handshake). */
 export interface IdentifyPayload {
   token: string;
@@ -327,6 +336,7 @@ export interface VoiceErrorPayload {
 export type ServerEvent =
   | Envelope<"ready", ReadyPayload>
   | Envelope<"presence.update", PresenceUpdatePayload>
+  | Envelope<"user.update", UserUpdatePayload>
   | Envelope<"message.create", MessageCreatePayload>
   | Envelope<"channel.create", ChannelCreatePayload>
   | Envelope<"voice.joined", VoiceJoinedPayload>

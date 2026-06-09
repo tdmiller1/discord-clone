@@ -8,6 +8,7 @@ import { type Config, imagesDir } from "./config.js";
 import { openDatabase, type Db } from "./db.js";
 import { seedVoiceChannel } from "./channels.js";
 import authRoutes from "./routes/auth.js";
+import userRoutes from "./routes/users.js";
 import channelRoutes from "./routes/channels.js";
 import attachmentRoutes from "./routes/attachments.js";
 import wsGateway from "./ws/gateway.js";
@@ -95,6 +96,10 @@ export async function buildApp(config: Config): Promise<FastifyInstance> {
   // Auth REST endpoints (register/login/logout/refresh). Config is passed via the
   // register options so handlers can read the session TTL and rate-limit knobs.
   void app.register(authRoutes, { config });
+
+  // User-profile REST endpoints (PATCH /api/users/me — change username). Registered
+  // after rate-limit so it can opt into the same per-IP throttle as the auth routes.
+  void app.register(userRoutes, { config });
 
   // Multipart parser for image uploads, capped at MAX_UPLOAD_MB so oversized
   // uploads are rejected by the framework rather than buffered unboundedly
