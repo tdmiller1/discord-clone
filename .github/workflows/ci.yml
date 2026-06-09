@@ -28,8 +28,10 @@ jobs:
           echo "tag $GITHUB_REF_NAME matches committed version $COMMITTED"
 
 
+  # Cheap, always-on validation. The Docker image build moved to release-server-image
+  # (tag-only) — building it on every push/PR just to throw it away wasted cycles.
   server:
-    name: Server (build + health + image)
+    name: Server (build + health)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -50,11 +52,31 @@ jobs:
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:8080/health && break; sleep 0.5; done
           curl -sf http://127.0.0.1:8080/health
           kill "$SRV"
-      - name: Build Docker image
-        run: docker build -t discord-clone-server:ci .
+
+  # Cheap, always-on client validation (type + template check) that replaces the
+  # full Tauri installer build on push/PR — no Rust, no native compile.
+  client-check:
+    name: Client (svelte-check)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+      - run: npm run check
 
   client:
     name: Client (tauri build)
+    # Installers are release artifacts — only build the (slow, multi-OS, native) Tauri
+    # bundles on v* tags. Push/PR validation lives in the client-check job above.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release-version-guard
     permissions:
       contents: write
     strategy:
@@ -173,6 +195,41 @@ jobs:
         working-directory: server
         run: docker build -t "$IMAGE:$VERSION" -t "$IMAGE:latest" .
       - name: Push server image
+        run: |
+          docker push "$IMAGE:$VERSION"
+          docker push "$IMAGE:latest"
+
+  release-web-image:
+    name: Release web image (push to GHCR)
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release-version-guard
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/tdmiller1/discord-clone-web
+      # Public deployment URLs baked into the bundle at build time (the web client reads
+      # import.meta.env.VITE_SERVER_URL / VITE_APP_URL — see client/src/lib/config.ts).
+      # Set these as repository Variables (Settings → Secrets and variables → Actions →
+      # Variables); they are public URLs, not secrets. Empty falls back to localhost /
+      # the page origin, which only suits local use.
+      VITE_SERVER_URL: ${{ vars.VITE_SERVER_URL }}
+      VITE_APP_URL: ${{ vars.VITE_APP_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Derive version from tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build web image
+        working-directory: client
+        run: |
+          docker build -f Dockerfile.web \
+            --build-arg VITE_SERVER_URL="$VITE_SERVER_URL" \
+            --build-arg VITE_APP_URL="$VITE_APP_URL" \
+            -t "$IMAGE:$VERSION" -t "$IMAGE:latest" .
+      - name: Push web image
         run: |
           docker push "$IMAGE:$VERSION"
           docker push "$IMAGE:latest"
