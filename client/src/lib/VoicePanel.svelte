@@ -2,6 +2,7 @@
   import { store } from "./authStore.svelte";
   import { gateway } from "./gateway.svelte";
   import { voice } from "./voice.svelte";
+  import Avatar from "./Avatar.svelte";
 
   // The single seeded voice channel (or null if none seeded). Voice is a parallel control —
   // it is never routed through channelStore.select, so the message pane is unaffected.
@@ -10,6 +11,14 @@
   const joining = $derived(voice.status === "joining");
   const selfId = $derived(store.currentUser?.id ?? null);
   const selfName = $derived(store.currentUser?.username ?? "you");
+  const selfAvatarId = $derived(store.currentUser?.avatarId ?? null);
+
+  // Audio level above which we ring a participant's avatar to show they're talking.
+  // The same normalized 0–1 level drives the meter fill, so the ring and bar agree.
+  const SPEAKING_THRESHOLD = 0.12;
+  // A muted mic still produces no signal, but guard anyway so we never light our own
+  // ring while muted.
+  const selfSpeaking = $derived(!voice.muted && voice.localLevel > SPEAKING_THRESHOLD);
 
   const memberById = $derived(new Map(gateway.members.map((m) => [m.id, m])));
 
@@ -17,6 +26,13 @@
     if (userId === null) return fallback;
     const m = memberById.get(userId);
     return m?.displayName ?? m?.username ?? fallback;
+  }
+
+  // The avatar for a participant, resolved from the member list. Null (unknown user or
+  // no picture) makes Avatar fall back to the name initial, matching the members list.
+  function participantAvatarId(userId: number | null): number | null {
+    if (userId === null) return null;
+    return memberById.get(userId)?.avatarId ?? null;
   }
 </script>
 
@@ -57,7 +73,9 @@
     {#if inVoice}
       <ul class="in-voice">
         <li class="member">
-          <span class="dot online"></span>
+          <span class="avatar-ring" class:speaking={selfSpeaking}>
+            <Avatar avatarId={selfAvatarId} name={selfName} size={28} />
+          </span>
           <span class="name">{selfName} (you)</span>
           {#if voice.muted}<span class="muted-marker" title="Muted">🔇</span>{/if}
           <span class="meter" title="Mic input level">
@@ -65,9 +83,12 @@
           </span>
         </li>
         {#each voice.participants as p (p.participantId)}
+          {@const name = participantName(p.userId, p.participantId)}
           <li class="member">
-            <span class="dot online"></span>
-            <span class="name">{participantName(p.userId, p.participantId)}</span>
+            <span class="avatar-ring" class:speaking={voice.levelFor(p.participantId) > SPEAKING_THRESHOLD}>
+              <Avatar avatarId={participantAvatarId(p.userId)} {name} size={28} />
+            </span>
+            <span class="name">{name}</span>
             {#if p.muted}<span class="muted-marker" title="Muted">🔇</span>{/if}
             <span class="meter" title="Incoming audio level">
               <span
@@ -129,14 +150,19 @@
     gap: 0.6rem;
     padding: 0.4rem 0;
   }
-  .dot {
-    width: 0.6rem;
-    height: 0.6rem;
-    border-radius: 50%;
+  /* Avatar with a "speaking" ring: a transparent outline by default that lights up
+     green the moment the participant's audio level crosses SPEAKING_THRESHOLD. The
+     transition softens the on/off so brief level dips don't look like flicker. */
+  .avatar-ring {
     flex: none;
+    display: block;
+    line-height: 0;
+    border-radius: 50%;
+    box-shadow: 0 0 0 2px transparent;
+    transition: box-shadow 90ms ease;
   }
-  .dot.online {
-    background: var(--ok);
+  .avatar-ring.speaking {
+    box-shadow: 0 0 0 2px var(--ok);
   }
   .name {
     color: var(--text);

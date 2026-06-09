@@ -102,6 +102,11 @@
     height: 100%;
     object-fit: cover;
     display: block;
+    /* Round the <img> itself rather than relying on the parent's overflow:hidden +
+       border-radius to clip it — WebKitGTK (Tauri's Linux webview) doesn't clip a
+       replaced element to an ancestor's border-radius, so a real uploaded photo would
+       otherwise render square. Matches InlineImage, which rounds the <img> directly. */
+    border-radius: inherit;
   }
   .fallback {
     width: 100%;
