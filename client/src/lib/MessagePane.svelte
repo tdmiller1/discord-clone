@@ -276,6 +276,7 @@
   .pane {
     display: flex;
     flex-direction: column;
+    flex: 1;
     min-height: 0;
   }
   h2 {
@@ -346,7 +347,13 @@
   .composer .attach {
     flex: 0 0 auto;
     width: 2rem;
-    font-size: 1.1rem;
+    /* Square icon button: zero the global button padding (which on a 2rem-wide
+       border-box button would shove the glyph off-center) and flex-center the +. */
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
     line-height: 1;
   }
   .pending {
